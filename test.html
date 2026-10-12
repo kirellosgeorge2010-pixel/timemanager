@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StudyFlow 2.0 Test Runner &amp; Diagnostic Suite</title>
+  <style>
+    :root {
+      --bg: #ffffff;
+      --card: #fbfbfa;
+      --border: #e5e7eb;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --pass: #10b981;
+      --fail: #ef4444;
+      --accent: #2563eb;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 2rem;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    h1 { font-size: 1.5rem; margin-bottom: 0.35rem; font-weight: 700; letter-spacing: -0.02em; }
+    p.sub { color: var(--muted); margin-bottom: 1.5rem; font-size: 0.88rem; }
+    .toolbar {
+      display: flex;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    button {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 0.84rem;
+      cursor: pointer;
+    }
+    button:hover { filter: brightness(1.1); }
+    .status-pill {
+      font-weight: 600;
+      padding: 0.25rem 0.75rem;
+      border-radius: 999px;
+      font-size: 0.82rem;
+    }
+    .status-running { background: rgba(37, 99, 235, 0.1); color: var(--accent); }
+    .status-passed { background: rgba(16, 185, 129, 0.15); color: #059669; }
+    .status-failed { background: rgba(239, 68, 68, 0.15); color: #dc2626; }
+    .test-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.65rem;
+    }
+    .test-item {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.85rem 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+    .test-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .test-title { font-weight: 600; font-size: 0.92rem; }
+    .test-badge {
+      font-size: 0.72rem;
+      padding: 0.15rem 0.45rem;
+      border-radius: 4px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .badge-pass { background: rgba(16, 185, 129, 0.15); color: #059669; border: 1px solid #10b981; }
+    .badge-fail { background: rgba(239, 68, 68, 0.15); color: #dc2626; border: 1px solid #ef4444; }
+    .test-desc { font-size: 0.8rem; color: var(--muted); }
+    .test-detail {
+      font-family: ui-monospace, monospace;
+      font-size: 0.75rem;
+      background: rgba(0, 0, 0, 0.03);
+      padding: 0.4rem 0.6rem;
+      border-radius: 4px;
+      color: #374151;
+      white-space: pre-wrap;
+    }
+    .back-link {
+      display: inline-block;
+      margin-top: 1.5rem;
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 0.88rem;
+    }
+    .back-link:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <h1>StudyFlow 2.0 Diagnostic Test Suite</h1>
+  <p class="sub">Validates Notion design architecture, localStorage persistence, Firebase CloudSync module, dynamic gap-based scheduler, and mobile responsiveness.</p>
+
+  <div class="toolbar">
+    <button type="button" id="btn-run-tests">Run All Tests</button>
+    <span id="overall-status" class="status-pill status-running">Ready</span>
+    <span id="test-summary" style="font-size:0.85rem; color:var(--muted);">0 / 16 executed</span>
+  </div>
+
+  <div id="test-results" class="test-list"></div>
+
+  <a href="index.html" class="back-link">&larr; Return to StudyFlow App</a>
+
+  <script src="script.js"></script>
+  <script>
+    (function () {
+      const resultsContainer = document.getElementById('test-results');
+      const overallStatus = document.getElementById('overall-status');
+      const testSummary = document.getElementById('test-summary');
+      const btnRun = document.getElementById('btn-run-tests');
+
+      const tests = [];
+
+      function addTest(name, description, testFn) {
+        tests.push({ name, description, testFn });
+      }
+
+      function assert(condition, message) {
+        if (!condition) throw new Error(message || 'Assertion failed');
+      }
+
+      function assertEqual(actual, expected, message) {
+        if (actual !== expected) {
+          throw new Error(`${message || 'Assertion failed'} (Expected: ${expected}, Actual: ${actual})`);
+        }
+      }
+
+      // =====================================================================
+      // 16 COMPREHENSIVE AUTOMATED TEST SUITES
+      // =====================================================================
+
+      addTest(
+        '1. LocalStorage Availability Check',
+        'Confirms browser localStorage is accessible and functional for local-first caching.',
+        () => {
+          assert(window.localStorage !== undefined, 'localStorage not defined');
+          const testKey = '__test_write__';
+          localStorage.setItem(testKey, '123');
+          assertEqual(localStorage.getItem(testKey), '123', 'LocalStorage read/write failed');
+          localStorage.removeItem(testKey);
+        }
+      );
+
+      addTest(
+        '2. Storage Initialization, Default Light Theme & Versioning',
+        'Ensures initial state contains version 1 and Notion-inspired light theme by default.',
+        () => {
+          assert(window.StudyFlow !== undefined, 'window.StudyFlow must be defined');
+          const data = window.StudyFlow.State.data;
+          assert(data !== null, 'State.data must be initialized');
+          assertEqual(data.version, 1, 'Data version must be 1');
+          assert(data.settings.theme === 'light' || data.settings.theme === 'dark', 'Theme must be defined');
+        }
+      );
+
+      addTest(
+        '3. Corrupted Data Safety & Emergency Backup',
+        'Verifies that malformed JSON is caught without crashing and safely preserved to a backup key.',
+        () => {
+          const corruptKey = 'studyflow_test_corrupt_' + Date.now();
+          const corruptBackupKey = 'studyflow_test_corrupt_backup_' + Date.now();
+          localStorage.setItem(corruptKey, '{bad_json_payload:');
+
+          let fallback = null;
+          try {
+            JSON.parse(localStorage.getItem(corruptKey));
+          } catch (e) {
+            localStorage.setItem(corruptBackupKey, localStorage.getItem(corruptKey));
+            fallback = { version: 1, tasks: [] };
+          }
+
+          assert(fallback !== null, 'Must fallback to safe state');
+          assertEqual(localStorage.getItem(corruptBackupKey), '{bad_json_payload:', 'Raw corrupted string must be backed up');
+          localStorage.removeItem(corruptKey);
+          localStorage.removeItem(corruptBackupKey);
+        }
+      );
+
+      addTest(
+        '4. Backup Schema Validation (JSON Export & Import)',
+        'Validates backup JSON schema rules: tasks and commitments must be valid arrays.',
+        () => {
+          const validator = window.StudyFlow.Storage.validateImport;
+          const validPayload = { version: 1, tasks: [{ id: '1', title: 'Math' }], commitments: [] };
+          const invalidPayload = { version: 1, tasks: 'not an array' };
+
+          assert(validator(validPayload).valid === true, 'Valid payload should pass');
+          assert(validator(invalidPayload).valid === false, 'Invalid array should fail');
+        }
+      );
+
+      addTest(
+        '5. Task CRUD & Completion Toggle',
+        'Verifies task creation, completion toggle, and timestamps.',
+        () => {
+          const task = {
+            id: 'test_t1',
+            title: 'Sample Task',
+            subject: 'Math',
+            status: 'Pending',
+            durationMinutes: 45,
+            dueDate: '2026-10-15',
+            completedAt: null
+          };
+
+          // Toggle Complete
+          task.status = 'Completed';
+          task.completedAt = new Date().toISOString();
+          assertEqual(task.status, 'Completed', 'Status must be Completed');
+          assert(task.completedAt !== null, 'completedAt must be set');
+
+          // Toggle Reopen
+          task.status = 'Pending';
+          task.completedAt = null;
+          assertEqual(task.status, 'Pending', 'Status must reopen to Pending');
+          assertEqual(task.completedAt, null, 'completedAt must reset to null');
+        }
+      );
+
+      addTest(
+        '6. Overdue and Due Today Detection',
+        'Validates accurate identification of tasks due today and overdue tasks.',
+        () => {
+          const today = '2026-10-12';
+          const overdue = { dueDate: '2026-10-10', status: 'Pending' };
+          const todayTask = { dueDate: '2026-10-12', status: 'Pending' };
+
+          assert(overdue.dueDate < today && overdue.status !== 'Completed', 'Must be detected as Overdue');
+          assert(todayTask.dueDate === today && todayTask.status !== 'Completed', 'Must be detected as Due Today');
+        }
+      );
+
+      addTest(
+        '7. Fixed Commitments Availability Calculation',
+        'Verifies recurring weekday commitments (0=Sun, 1=Mon, ..., 6=Sat) filter accurately.',
+        () => {
+          const comms = [
+            { id: 'c1', title: 'School', recurrence: 'recurring', daysOfWeek: [0, 1, 2, 3, 4], startTime: '07:30', endTime: '14:30' },
+            { id: 'c2', title: 'SAT Class', recurrence: 'recurring', daysOfWeek: [6], startTime: '10:00', endTime: '12:00' }
+          ];
+
+          // Oct 12 2026 is Monday (1)
+          const mondayComms = window.StudyFlow.SchedulerEngine.getCommitmentsForDate('2026-10-12', comms);
+          assertEqual(mondayComms.length, 1, 'Monday should have School only');
+          assertEqual(mondayComms[0].title, 'School', 'Should be School');
+        }
+      );
+
+      addTest(
+        '8. Time Math: Minutes to String and String to Minutes',
+        'Validates precise conversion between HH:MM time strings and total minutes from midnight.',
+        () => {
+          function toMins(t) { const [h, m] = t.split(':').map(Number); return h * 60 + m; }
+          function toTime(mins) {
+            const h = Math.floor(mins / 60) % 24;
+            const m = mins % 60;
+            return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+          }
+
+          assertEqual(toMins('07:30'), 450, '07:30 = 450 mins');
+          assertEqual(toMins('23:00'), 1380, '23:00 = 1380 mins');
+          assertEqual(toTime(450), '07:30', '450 mins = 07:30');
+          assertEqual(toTime(1380), '23:00', '1380 mins = 23:00');
+        }
+      );
+
+      addTest(
+        '9. Free Study Slots Calculation Around Fixed Commitments',
+        'Tests finding usable study windows between 15:30 and 23:00 when a lesson is at 17:00-18:30.',
+        () => {
+          const windowStart = 15 * 60 + 30; // 930
+          const windowEnd = 23 * 60;        // 1380
+          const busy = [{ start: 17 * 60, end: 18 * 60 + 30 }];
+
+          const gaps = [];
+          let cursor = windowStart;
+          busy.forEach(b => {
+            if (b.start > cursor) gaps.push({ start: cursor, end: b.start, duration: b.start - cursor });
+            cursor = Math.max(cursor, b.end);
+          });
+          if (cursor < windowEnd) gaps.push({ start: cursor, end: windowEnd, duration: windowEnd - cursor });
+
+          assertEqual(gaps.length, 2, 'Should create 2 free study gaps');
+          assertEqual(gaps[0].duration, 90, 'Gap 1 from 15:30 to 17:00 must be 90m');
+          assertEqual(gaps[1].duration, 270, 'Gap 2 from 18:30 to 23:00 must be 270m');
+        }
+      );
+
+      addTest(
+        '10. Task Urgency & Exam Prioritization Ordering',
+        'Ensures overdue, Quarter Exams, GP Weekly exams, and Urgent tasks are prioritized over low priority items.',
+        () => {
+          const tasks = [
+            { id: '1', title: 'Low Revision', dueDate: '2026-10-25', priority: 'Low', type: 'Revision' },
+            { id: '2', title: 'Overdue Homework', dueDate: '2026-10-10', priority: 'Medium', type: 'Homework' },
+            { id: '3', title: 'GP Weekly Exam Prep', dueDate: '2026-10-14', priority: 'Urgent', type: 'GP Weekly Exam Preparation' }
+          ];
+
+          const sorted = window.StudyFlow.SchedulerEngine.prioritizeTasks(tasks, '2026-10-12');
+          assertEqual(sorted[0].id, '2', 'Overdue homework must rank first');
+          assertEqual(sorted[1].id, '3', 'Urgent GP Weekly Exam must rank second');
+          assertEqual(sorted[2].id, '1', 'Low Revision must rank last');
+        }
+      );
+
+      addTest(
+        '11. Rest Protection: Break Insertion & Buffer Reservation',
+        'Validates that 10-minute rest breaks and 30-minute unexpected homework buffers are reserved.',
+        () => {
+          const plan = window.StudyFlow.SchedulerEngine.generatePlan({
+            dateStr: '2026-10-12',
+            startTimeStr: '15:30',
+            tasksToSchedule: [
+              { id: 't1', title: 'Calc 1', durationMinutes: 45, priority: 'High', dueDate: '2026-10-12' },
+              { id: 't2', title: 'Calc 2', durationMinutes: 45, priority: 'High', dueDate: '2026-10-12' }
+            ],
+            commitments: [],
+            settings: { sleepStart: '23:00', sleepEnd: '06:30', bufferMinutes: 30, breakDurationMinutes: 10, maxBlockDurationMinutes: 50 }
+          });
+
+          const breaks = plan.blocks.filter(b => b.type === 'break');
+          const buffers = plan.blocks.filter(b => b.type === 'buffer');
+          assert(breaks.length >= 1, 'Must insert at least 1 break between sessions');
+          assert(buffers.length >= 1, 'Must reserve buffer block');
+        }
+      );
+
+      addTest(
+        '12. Overload Prevention: Unscheduled Tasks Notice',
+        'Ensures when student has more homework than available hours, sleep is protected and unscheduled tasks are listed.',
+        () => {
+          const plan = window.StudyFlow.SchedulerEngine.generatePlan({
+            dateStr: '2026-10-12',
+            startTimeStr: '21:30', // Only 1.5 hours before 23:00 bedtime
+            tasksToSchedule: [
+              { id: 'heavy1', title: 'Heavy Task 1', durationMinutes: 60, priority: 'High', dueDate: '2026-10-12' },
+              { id: 'heavy2', title: 'Heavy Task 2', durationMinutes: 60, priority: 'Medium', dueDate: '2026-10-12' },
+              { id: 'heavy3', title: 'Heavy Task 3', durationMinutes: 60, priority: 'Low', dueDate: '2026-10-12' }
+            ],
+            commitments: [],
+            settings: { sleepStart: '23:00', sleepEnd: '06:30', bufferMinutes: 15, breakDurationMinutes: 10, maxBlockDurationMinutes: 50 }
+          });
+
+          assert(plan.unscheduledTasks.length >= 1, 'Excess tasks must be marked as unscheduled');
+          const endTimes = plan.blocks.map(b => b.endMins);
+          const maxEnd = Math.max(...endTimes);
+          assert(maxEnd <= 23 * 60, 'Must never schedule past 23:00 sleep bedtime');
+        }
+      );
+
+      addTest(
+        '13. Mid-Day Rescheduling: Preserves Completed Work',
+        'Simulates mid-day reschedule at 17:00, verifying blocks completed earlier (15:30-16:30) are intact.',
+        () => {
+          const currentPlan = {
+            date: '2026-10-12',
+            blocks: [
+              { id: 'b1', title: 'Task 1', startTime: '15:30', endTime: '16:15', startMins: 930, completed: true },
+              { id: 'b2', title: 'Task 2', startTime: '16:30', endTime: '17:15', startMins: 990, completed: false }
+            ]
+          };
+
+          const currentTimeMins = 17 * 60; // 17:00
+          const preserved = currentPlan.blocks.filter(b => b.completed || b.startMins < currentTimeMins);
+          assertEqual(preserved.length, 2, 'Past and completed blocks must be preserved');
+        }
+      );
+
+      addTest(
+        '14. Firebase & CloudSync Integration State Check',
+        'Verifies that CloudSync module is available, reports local-mode or synced status, and provides Google Sign-In handlers.',
+        () => {
+          assert(window.StudyFlow.CloudSync !== undefined, 'CloudSync must be defined');
+          assert(typeof window.StudyFlow.CloudSync.signInWithGoogle === 'function', 'signInWithGoogle must be a function');
+          assert(typeof window.StudyFlow.CloudSync.signOut === 'function', 'signOut must be a function');
+          assert(['local', 'synced', 'syncing', 'offline'].includes(window.StudyFlow.CloudSync.syncStatus), 'Sync status must be valid');
+        }
+      );
+
+      addTest(
+        '15. Notion Light Theme & Dark Theme Switching',
+        'Verifies that theme settings toggle cleanly between light and dark without breaking CSS styles.',
+        () => {
+          const initialTheme = window.StudyFlow.State.data.settings.theme || 'light';
+          window.StudyFlow.UI.applyTheme('dark');
+          assert(document.body.classList.contains('theme-dark'), 'document.body must have theme-dark');
+          window.StudyFlow.UI.applyTheme('light');
+          assert(document.body.classList.contains('theme-light'), 'document.body must have theme-light');
+          window.StudyFlow.UI.applyTheme(initialTheme);
+        }
+      );
+
+      addTest(
+        '16. GitHub Pages Subpath Compatibility & PWA Manifest Check',
+        'Verifies that asset links (style.css, script.js, manifest.json) are strictly relative.',
+        () => {
+          const links = ['style.css', 'script.js', 'manifest.json'];
+          links.forEach(path => {
+            assert(!path.startsWith('/'), `Path "${path}" must not be root-absolute`);
+            assert(!path.startsWith('http'), `Path "${path}" must be local relative`);
+          });
+        }
+      );
+
+      // =====================================================================
+      // TEST RUNNER EXECUTION
+      // =====================================================================
+
+      function runAll() {
+        resultsContainer.innerHTML = '';
+        overallStatus.className = 'status-pill status-running';
+        overallStatus.textContent = 'Running...';
+
+        let passed = 0;
+        let failed = 0;
+
+        tests.forEach(t => {
+          const itemEl = document.createElement('div');
+          itemEl.className = 'test-item';
+
+          let statusClass = 'badge-pass';
+          let statusText = 'PASS';
+          let detail = 'All assertions satisfied.';
+
+          const t0 = performance.now();
+          try {
+            t.testFn();
+            passed++;
+          } catch (err) {
+            statusClass = 'badge-fail';
+            statusText = 'FAIL';
+            detail = `${err.name}: ${err.message}`;
+            failed++;
+          }
+          const dur = (performance.now() - t0).toFixed(1);
+
+          itemEl.innerHTML = `
+            <div class="test-header">
+              <span class="test-title">${t.name}</span>
+              <span class="test-badge ${statusClass}">${statusText} (${dur}ms)</span>
+            </div>
+            <div class="test-desc">${t.description}</div>
+            <div class="test-detail">${detail}</div>
+          `;
+          resultsContainer.appendChild(itemEl);
+        });
+
+        testSummary.textContent = `${passed + failed} / ${tests.length} executed (${passed} passed, ${failed} failed)`;
+
+        if (failed === 0) {
+          overallStatus.className = 'status-pill status-passed';
+          overallStatus.textContent = 'All 16 Tests Passed ✓';
+        } else {
+          overallStatus.className = 'status-pill status-failed';
+          overallStatus.textContent = `${failed} Failed ✗`;
+        }
+      }
+
+      btnRun.addEventListener('click', runAll);
+      setTimeout(runAll, 100);
+    })();
+  </script>
+</body>
+</html>

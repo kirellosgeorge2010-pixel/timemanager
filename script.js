@@ -1,23 +1,25 @@
 /**
- * StudyFlow: Grade 11 Adaptive Study Planner
- * Vanilla JavaScript (ES6+) - Clean, Modular, Zero Dependencies
+ * StudyFlow 2.0: Simple, Notion-Inspired, Cross-Device Study Planner
+ * Vanilla JavaScript (ES6+) with Firebase Authentication & Cloud Firestore
  *
  * Architecture:
- * - StorageEngine: Safe versioned localStorage persistence, corruption handling, export/import
- * - State: Single reactive source of truth for tasks, commitments, plans, settings
- * - SchedulerEngine: Dynamic gap calculation, break insertion, buffer management, priority sorting
- * - UI: DOM rendering, event handling, toasts, modals, responsive navigation
+ * - Storage: Local-first persistence engine with corruption protection
+ * - CloudSync: Firebase Auth (Google Sign-In) & Firestore real-time synchronization
+ * - State: Authoritative state manager for tasks, commitments, plans, preferences
+ * - SchedulerEngine: Gap-based dynamic study planner with overload protection
+ * - UI: Clean Notion-style views (Today, Tasks, Calendar, Settings), mobile bottom nav
  */
 
 (function () {
   'use strict';
 
   // =========================================================================
-  // CONSTANTS & INITIAL DATA
+  // CONSTANTS & STARTER TEMPLATES
   // =========================================================================
 
   const STORAGE_KEY = 'studyflow_v1_store';
   const STORAGE_VERSION = 1;
+  const FIREBASE_CONFIG_KEY = 'studyflow_firebase_config';
 
   // Grade 11 Starter Commitments Template
   const STARTER_COMMITMENTS = [
@@ -29,7 +31,7 @@
       daysOfWeek: [0, 1, 2, 3, 4], // Sun - Thu
       startTime: '07:30',
       endTime: '14:30',
-      notes: 'Grade 11 regular school day'
+      notes: 'Grade 11 school day'
     },
     {
       id: 'comm_arabic_lesson',
@@ -39,7 +41,7 @@
       daysOfWeek: [1, 3], // Mon, Wed
       startTime: '16:00',
       endTime: '17:30',
-      notes: 'Weekly curriculum review & grammar'
+      notes: 'Weekly lesson & grammar review'
     },
     {
       id: 'comm_math_lesson',
@@ -49,7 +51,7 @@
       daysOfWeek: [2, 4], // Tue, Thu
       startTime: '17:00',
       endTime: '18:30',
-      notes: 'Calculus & Trigonometry tutor session'
+      notes: 'Calculus tutor session'
     },
     {
       id: 'comm_sat_lesson',
@@ -59,82 +61,56 @@
       daysOfWeek: [6], // Sat
       startTime: '10:00',
       endTime: '12:30',
-      notes: 'Timed practice tests & Math/English review'
-    },
-    {
-      id: 'comm_dinner_break',
-      title: 'Family Dinner & Rest',
-      category: 'meal',
-      recurrence: 'recurring',
-      daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
-      startTime: '19:30',
-      endTime: '20:15',
-      notes: 'Evening meal break'
+      notes: 'Practice modules & review'
     }
   ];
 
   // Grade 11 Starter Tasks Template
   const STARTER_TASKS = [
     {
-      id: 'task_sample_math_hw',
+      id: 'task_sample_calculus',
       title: 'Calculus Exercise 4.2 (Problems 1-15)',
       subject: 'Math',
       type: 'Homework',
       durationMinutes: 45,
-      dueDate: getRelativeDateString(1),
+      dueDate: getRelativeDateString(0),
       dueTime: '23:59',
       priority: 'High',
       status: 'Pending',
-      notes: 'Chain rule and implicit differentiation problems.',
+      notes: 'Implicit differentiation exercises.',
       preferredStudyDate: getRelativeDateString(0),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       completedAt: null
     },
     {
-      id: 'task_sample_sat_prep',
+      id: 'task_sample_sat_math',
       title: 'SAT Math Practice Module: Heart of Algebra',
       subject: 'SAT',
       type: 'SAT Math',
       durationMinutes: 50,
-      dueDate: getRelativeDateString(3),
+      dueDate: getRelativeDateString(2),
       dueTime: '18:00',
       priority: 'Urgent',
       status: 'Pending',
-      notes: 'Complete test section and analyze incorrect answers.',
+      notes: 'Complete module questions and review errors.',
       preferredStudyDate: getRelativeDateString(0),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       completedAt: null
     },
     {
-      id: 'task_sample_arabic_gp',
+      id: 'task_sample_arabic_prep',
       title: 'Arabic GP Weekly Exam Preparation',
       subject: 'Arabic',
       type: 'GP Weekly Exam Preparation',
       durationMinutes: 60,
-      dueDate: getRelativeDateString(2),
+      dueDate: getRelativeDateString(1),
       dueTime: '08:00',
       priority: 'Urgent',
       status: 'Pending',
-      notes: 'Review rhetoric questions and memorization passages.',
-      preferredStudyDate: getRelativeDateString(1),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      completedAt: null
-    },
-    {
-      id: 'task_sample_english_essay',
-      title: 'English Literary Analysis Rough Draft',
-      subject: 'English',
-      type: 'Homework',
-      durationMinutes: 40,
-      dueDate: getRelativeDateString(4),
-      dueTime: '23:59',
-      priority: 'Medium',
-      status: 'Pending',
-      notes: 'Write 3 body paragraphs on thematic motifs.',
-      preferredStudyDate: getRelativeDateString(2),
+      notes: 'Rhetoric & text analysis review.',
+      preferredStudyDate: getRelativeDateString(0),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       completedAt: null
@@ -142,6 +118,7 @@
   ];
 
   const DEFAULT_SETTINGS = {
+    theme: 'light', // Notion-inspired clean white default
     sleepStart: '23:00',
     sleepEnd: '06:30',
     bufferMinutes: 30,
@@ -150,8 +127,18 @@
     studyStartTime: '15:30'
   };
 
+  // Default Firebase configuration (Can be customized by user in Settings)
+  const DEFAULT_FIREBASE_CONFIG = {
+    apiKey: "AIzaSyStudyFlowStaticAppKeyDemoOnly",
+    authDomain: "studyflow-planner.firebaseapp.com",
+    projectId: "studyflow-planner",
+    storageBucket: "studyflow-planner.appspot.com",
+    messagingSenderId: "100000000000",
+    appId: "1:100000000000:web:studyflowdemokey"
+  };
+
   // =========================================================================
-  // STORAGE & PERSISTENCE ENGINE
+  // LOCAL STORAGE & PERSISTENCE ENGINE (LOCAL-FIRST)
   // =========================================================================
 
   const Storage = {
@@ -168,24 +155,20 @@
 
     load() {
       if (!this.isAvailable()) {
-        UI.toast('Local storage is not supported or disabled in this browser. Changes will not persist after refresh.', 'danger', 8000);
         return this.createInitialData();
       }
 
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (!raw) {
-          // Fresh install
           const initial = this.createInitialData();
           this.save(initial, false);
           return initial;
         }
 
         const parsed = JSON.parse(raw);
-
-        // Validation & Schema Migration
         if (!parsed || typeof parsed !== 'object') {
-          throw new Error('Invalid data root object');
+          throw new Error('Corrupted storage root object');
         }
 
         return {
@@ -197,41 +180,32 @@
           lastSavedAt: parsed.lastSavedAt || new Date().toISOString()
         };
       } catch (err) {
-        console.error('StudyFlow storage parse error:', err);
-        // CRITICAL REQUIREMENT: Never silently erase corrupted data!
+        console.error('StudyFlow storage error:', err);
         try {
           const rawCorrupted = localStorage.getItem(STORAGE_KEY);
           if (rawCorrupted) {
-            const backupKey = `studyflow_corrupt_backup_${Date.now()}`;
-            localStorage.setItem(backupKey, rawCorrupted);
-            UI.toast(`Storage error encountered! Raw backup saved to key: "${backupKey}". Safe mode initialized.`, 'danger', 10000);
+            localStorage.setItem(`studyflow_corrupt_backup_${Date.now()}`, rawCorrupted);
           }
         } catch (backupErr) {
-          console.error('Failed to backup corrupted string:', backupErr);
+          console.error('Failed to create backup:', backupErr);
         }
-
         return this.createInitialData();
       }
     },
 
-    save(data, showNotification = true) {
-      if (!this.isAvailable()) {
-        UI.toast('Storage unavailable: Cannot save changes to browser.', 'danger');
-        return false;
-      }
-
+    save(data, notifyCloud = true) {
+      if (!this.isAvailable()) return false;
       try {
         data.lastSavedAt = new Date().toISOString();
-        const serialized = JSON.stringify(data);
-        localStorage.setItem(STORAGE_KEY, serialized);
-        UI.updateStorageMeta(data);
-        if (showNotification) {
-          UI.toast('Changes saved to browser storage.', 'success', 2000);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+
+        // Trigger background sync to Cloud Firestore if connected
+        if (notifyCloud && typeof CloudSync !== 'undefined' && CloudSync.isAuthenticated()) {
+          CloudSync.queueSync();
         }
         return true;
       } catch (err) {
-        console.error('StudyFlow save error:', err);
-        UI.toast('Failed to save data! Storage quota may be full or blocked.', 'danger', 7000);
+        console.error('LocalStorage write failure:', err);
         return false;
       }
     },
@@ -253,31 +227,284 @@
         const blob = new Blob([payload], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        const dateStr = getTodayDateString();
         a.href = url;
-        a.download = `studyflow-backup-${dateStr}.json`;
+        a.download = `studyflow-backup-${getTodayDateString()}.json`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-        UI.toast('Backup successfully downloaded.', 'success');
       } catch (e) {
         console.error('Export error:', e);
-        UI.toast('Failed to generate export file.', 'danger');
       }
     },
 
     validateImport(jsonData) {
       if (!jsonData || typeof jsonData !== 'object') {
-        return { valid: false, message: 'File is not a valid JSON object.' };
+        return { valid: false, message: 'Invalid JSON object' };
       }
       if (!Array.isArray(jsonData.tasks)) {
-        return { valid: false, message: 'Invalid backup: "tasks" array missing.' };
+        return { valid: false, message: 'Backup missing "tasks" array' };
       }
       if (!Array.isArray(jsonData.commitments)) {
-        return { valid: false, message: 'Invalid backup: "commitments" array missing.' };
+        return { valid: false, message: 'Backup missing "commitments" array' };
       }
       return { valid: true };
+    }
+  };
+
+  // =========================================================================
+  // FIREBASE CLOUD SYNCHRONIZATION ENGINE (CROSS-DEVICE)
+  // =========================================================================
+
+  const CloudSync = {
+    auth: null,
+    db: null,
+    currentUser: null,
+    syncStatus: 'local', // 'local' | 'synced' | 'syncing' | 'offline'
+    unsubscribeSnapshot: null,
+    syncDebounceTimer: null,
+
+    init() {
+      this.updateStatusBadge();
+
+      // Check for custom config saved by user
+      let config = DEFAULT_FIREBASE_CONFIG;
+      try {
+        const savedCustom = localStorage.getItem(FIREBASE_CONFIG_KEY);
+        if (savedCustom) {
+          config = JSON.parse(savedCustom);
+        }
+      } catch (e) {
+        console.warn('Failed to parse custom Firebase config:', e);
+      }
+
+      // Initialize Firebase if SDK is available
+      if (typeof firebase !== 'undefined' && firebase.initializeApp) {
+        try {
+          if (!firebase.apps.length) {
+            firebase.initializeApp(config);
+          }
+          this.auth = firebase.auth();
+          this.db = firebase.firestore();
+
+          // Listen to Auth State
+          this.auth.onAuthStateChanged(user => {
+            this.handleAuthStateChange(user);
+          });
+        } catch (err) {
+          console.warn('Firebase initialization notice:', err.message);
+          this.syncStatus = 'local';
+          this.updateStatusBadge();
+        }
+      }
+
+      // Monitor network online / offline
+      window.addEventListener('online', () => {
+        if (this.currentUser) {
+          this.syncStatus = 'synced';
+          this.updateStatusBadge();
+          this.queueSync();
+        }
+      });
+
+      window.addEventListener('offline', () => {
+        if (this.currentUser) {
+          this.syncStatus = 'offline';
+          this.updateStatusBadge();
+        }
+      });
+    },
+
+    isAuthenticated() {
+      return !!this.currentUser;
+    },
+
+    handleAuthStateChange(user) {
+      this.currentUser = user;
+
+      const signedOutBox = document.getElementById('sync-signed-out-box');
+      const signedInBox = document.getElementById('sync-signed-in-box');
+      const avatarEl = document.getElementById('user-avatar');
+      const nameEl = document.getElementById('user-name');
+      const emailEl = document.getElementById('user-email');
+      const migrationAlert = document.getElementById('migration-alert');
+      const migrationCount = document.getElementById('migration-count');
+
+      if (user) {
+        // User is signed in
+        if (signedOutBox) signedOutBox.style.display = 'none';
+        if (signedInBox) signedInBox.style.display = 'block';
+
+        if (avatarEl) avatarEl.src = user.photoURL || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="%232563eb"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6"/></svg>';
+        if (nameEl) nameEl.textContent = user.displayName || 'StudyFlow Student';
+        if (emailEl) emailEl.textContent = user.email || '';
+
+        this.syncStatus = navigator.onLine ? 'synced' : 'offline';
+        this.updateStatusBadge();
+
+        // Check if user has pre-existing local data to offer migration
+        const localTasksCount = State.data.tasks.length;
+        if (localTasksCount > 0 && migrationAlert && migrationCount) {
+          migrationAlert.style.display = 'block';
+          migrationCount.textContent = `${localTasksCount} local tasks and schedules ready to save to your cloud account.`;
+        }
+
+        // Setup Real-time Firestore Listener on user's private document: users/{userId}/appState/main
+        this.setupCloudListener(user.uid);
+      } else {
+        // User is signed out
+        if (signedOutBox) signedOutBox.style.display = 'block';
+        if (signedInBox) signedInBox.style.display = 'none';
+        if (migrationAlert) migrationAlert.style.display = 'none';
+
+        if (this.unsubscribeSnapshot) {
+          this.unsubscribeSnapshot();
+          this.unsubscribeSnapshot = null;
+        }
+
+        this.syncStatus = 'local';
+        this.updateStatusBadge();
+      }
+    },
+
+    async signInWithGoogle() {
+      if (!this.auth) {
+        UI.toast('Firebase is in demo mode. Configure your Firebase project in Settings to enable live Google Sign-In.', 'warning', 5000);
+        return;
+      }
+      try {
+        const provider = new firebase.auth.GoogleAuthProvider();
+        await this.auth.signInWithPopup(provider);
+        UI.toast('Signed in successfully!', 'success');
+      } catch (err) {
+        console.error('Google Sign-in error:', err);
+        UI.toast('Sign-in cancelled or blocked by popup blocker.', 'danger', 4000);
+      }
+    },
+
+    async signOut() {
+      if (!this.auth) return;
+      try {
+        await this.auth.signOut();
+        UI.toast('Signed out. Switched to local mode.', 'info');
+      } catch (err) {
+        console.error('Sign-out error:', err);
+      }
+    },
+
+    setupCloudListener(userId) {
+      if (!this.db) return;
+      try {
+        const docRef = this.db.collection('users').doc(userId).collection('appState').doc('main');
+
+        this.unsubscribeSnapshot = docRef.onSnapshot(doc => {
+          if (doc.exists) {
+            const cloudData = doc.data();
+            // If cloud has newer data than local
+            if (cloudData && cloudData.lastSavedAt && (!State.data.lastSavedAt || cloudData.lastSavedAt > State.data.lastSavedAt)) {
+              State.data = {
+                version: STORAGE_VERSION,
+                tasks: Array.isArray(cloudData.tasks) ? cloudData.tasks : State.data.tasks,
+                commitments: Array.isArray(cloudData.commitments) ? cloudData.commitments : State.data.commitments,
+                plans: cloudData.plans || State.data.plans,
+                settings: Object.assign({}, DEFAULT_SETTINGS, cloudData.settings || {}),
+                lastSavedAt: cloudData.lastSavedAt
+              };
+              Storage.save(State.data, false);
+              UI.renderAll();
+              UI.toast('Data synchronized from cloud.', 'info', 2000);
+            }
+          }
+          this.syncStatus = 'synced';
+          this.updateStatusBadge();
+        }, err => {
+          console.warn('Firestore snapshot error:', err.message);
+          this.syncStatus = 'offline';
+          this.updateStatusBadge();
+        });
+      } catch (err) {
+        console.error('Error setting up cloud listener:', err);
+      }
+    },
+
+    queueSync() {
+      if (!this.currentUser || !this.db || !navigator.onLine) return;
+
+      this.syncStatus = 'syncing';
+      this.updateStatusBadge();
+
+      clearTimeout(this.syncDebounceTimer);
+      this.syncDebounceTimer = setTimeout(async () => {
+        try {
+          const docRef = this.db.collection('users').doc(this.currentUser.uid).collection('appState').doc('main');
+          await docRef.set({
+            tasks: State.data.tasks,
+            commitments: State.data.commitments,
+            plans: State.data.plans,
+            settings: State.data.settings,
+            lastSavedAt: new Date().toISOString()
+          }, { merge: true });
+
+          this.syncStatus = 'synced';
+          this.updateStatusBadge();
+        } catch (err) {
+          console.error('Firestore push error:', err);
+          this.syncStatus = 'offline';
+          this.updateStatusBadge();
+        }
+      }, 800); // 800ms debounce
+    },
+
+    async migrateLocalDataToCloud() {
+      if (!this.currentUser || !this.db) {
+        UI.toast('Sign in first before uploading local data.', 'warning');
+        return;
+      }
+      try {
+        this.syncStatus = 'syncing';
+        this.updateStatusBadge();
+
+        const docRef = this.db.collection('users').doc(this.currentUser.uid).collection('appState').doc('main');
+        await docRef.set({
+          tasks: State.data.tasks,
+          commitments: State.data.commitments,
+          plans: State.data.plans,
+          settings: State.data.settings,
+          lastSavedAt: new Date().toISOString()
+        }, { merge: true });
+
+        const alertEl = document.getElementById('migration-alert');
+        if (alertEl) alertEl.style.display = 'none';
+
+        this.syncStatus = 'synced';
+        this.updateStatusBadge();
+        UI.toast('Local tasks successfully uploaded to your cloud account!', 'success');
+      } catch (err) {
+        console.error('Migration failed:', err);
+        UI.toast('Failed to upload data. Check your network connection.', 'danger');
+      }
+    },
+
+    updateStatusBadge() {
+      const pills = [
+        document.getElementById('sidebar-sync-pill'),
+        document.getElementById('mobile-sync-pill'),
+        document.getElementById('settings-sync-badge')
+      ];
+
+      const labelMap = {
+        synced: 'Synced',
+        syncing: 'Syncing...',
+        offline: 'Offline',
+        local: 'Local Mode'
+      };
+
+      pills.forEach(pill => {
+        if (!pill) return;
+        pill.className = `sync-pill ${this.syncStatus}`;
+        const textSpan = pill.querySelector('.sync-text');
+        if (textSpan) textSpan.textContent = labelMap[this.syncStatus] || 'Local';
+      });
     }
   };
 
@@ -286,29 +513,32 @@
   // =========================================================================
 
   const State = {
-    data: Storage.load(),
-    currentTab: 'dashboard',
-    selectedPlannerDate: getTodayDateString(),
-    commitmentFilterDay: 'all',
+    data: null,
+    currentTab: 'today',
+    selectedCalendarDate: getTodayDateString(),
     taskFilters: {
-      search: '',
-      status: 'pending',
+      status: 'active',
       subject: 'all',
-      type: 'all',
       priority: 'all',
+      search: '',
       sort: 'dueDate-asc'
     },
     tempProposedPlan: null,
 
+    init() {
+      this.data = Storage.load();
+    },
+
     save(notify = true) {
-      Storage.save(this.data, notify);
+      Storage.save(this.data, true);
+      if (notify) UI.renderAll();
     },
 
     // Task Actions
     addTask(task) {
       this.data.tasks.unshift(task);
       this.save(true);
-      UI.renderAll();
+      UI.toast('Task added.', 'success', 2000);
     },
 
     updateTask(id, updatedFields) {
@@ -320,57 +550,49 @@
           updatedAt: new Date().toISOString()
         };
         this.save(true);
-        UI.renderAll();
+        UI.toast('Task updated.', 'success', 2000);
       }
     },
 
     toggleTaskStatus(id) {
       const task = this.data.tasks.find(t => t.id === id);
-      if (task) {
-        const isCompleted = task.status === 'Completed';
-        task.status = isCompleted ? 'Pending' : 'Completed';
-        task.completedAt = isCompleted ? null : new Date().toISOString();
-        task.updatedAt = new Date().toISOString();
+      if (!task) return;
+      const isCompleted = task.status === 'Completed';
+      task.status = isCompleted ? 'Pending' : 'Completed';
+      task.completedAt = isCompleted ? null : new Date().toISOString();
+      task.updatedAt = new Date().toISOString();
 
-        // Update block if present in current plan
-        const todayPlan = this.data.plans[getTodayDateString()];
-        if (todayPlan && todayPlan.blocks) {
-          todayPlan.blocks.forEach(b => {
-            if (b.taskId === id) {
-              b.completed = (task.status === 'Completed');
-            }
-          });
-        }
-
-        this.save(true);
-        UI.renderAll();
+      // Sync block in today's plan if present
+      const todayPlan = this.data.plans[getTodayDateString()];
+      if (todayPlan && Array.isArray(todayPlan.blocks)) {
+        todayPlan.blocks.forEach(b => {
+          if (b.taskId === id) b.completed = task.status === 'Completed';
+        });
       }
+
+      this.save(true);
     },
 
     deleteTask(id) {
       const idx = this.data.tasks.findIndex(t => t.id === id);
-      if (idx !== -1) {
-        const title = this.data.tasks[idx].title;
-        UI.confirm(`Are you sure you want to delete task "${title}"?`, () => {
-          this.data.tasks.splice(idx, 1);
-          // Remove from plans
-          Object.values(this.data.plans).forEach(plan => {
-            if (plan.blocks) {
-              plan.blocks = plan.blocks.filter(b => b.taskId !== id);
-            }
-          });
-          this.save(true);
-          UI.renderAll();
-          UI.toast(`Task "${title}" deleted.`, 'info');
+      if (idx === -1) return;
+      const title = this.data.tasks[idx].title;
+
+      UI.confirm(`Delete task "${title}"?`, () => {
+        this.data.tasks.splice(idx, 1);
+        Object.values(this.data.plans).forEach(p => {
+          if (p.blocks) p.blocks = p.blocks.filter(b => b.taskId !== id);
         });
-      }
+        this.save(true);
+        UI.toast('Task deleted.', 'info', 2000);
+      });
     },
 
-    // Commitment Actions
+    // Fixed Commitment Actions
     addCommitment(commitment) {
       this.data.commitments.push(commitment);
       this.save(true);
-      UI.renderAll();
+      UI.toast('Commitment saved.', 'success', 2000);
     },
 
     updateCommitment(id, updatedFields) {
@@ -378,39 +600,36 @@
       if (idx !== -1) {
         this.data.commitments[idx] = { ...this.data.commitments[idx], ...updatedFields };
         this.save(true);
-        UI.renderAll();
+        UI.toast('Commitment updated.', 'success', 2000);
       }
     },
 
     deleteCommitment(id) {
       const idx = this.data.commitments.findIndex(c => c.id === id);
-      if (idx !== -1) {
-        const title = this.data.commitments[idx].title;
-        UI.confirm(`Remove commitment "${title}"?`, () => {
-          this.data.commitments.splice(idx, 1);
-          this.save(true);
-          UI.renderAll();
-          UI.toast(`Commitment "${title}" removed.`, 'info');
-        });
-      }
+      if (idx === -1) return;
+      const title = this.data.commitments[idx].title;
+
+      UI.confirm(`Remove commitment "${title}"?`, () => {
+        this.data.commitments.splice(idx, 1);
+        this.save(true);
+        UI.toast('Commitment removed.', 'info', 2000);
+      });
     },
 
     // Daily Plan Actions
     saveDailyPlan(dateStr, planObj) {
       this.data.plans[dateStr] = planObj;
       this.save(true);
-      UI.renderAll();
+      UI.toast(`Schedule saved for ${formatDateDisplay(dateStr)}.`, 'success');
     },
 
     clearDailyPlan(dateStr) {
-      if (this.data.plans[dateStr]) {
-        UI.confirm(`Clear the daily plan for ${dateStr}? Your tasks will remain intact.`, () => {
-          delete this.data.plans[dateStr];
-          this.save(true);
-          UI.renderAll();
-          UI.toast(`Plan for ${dateStr} cleared.`, 'info');
-        });
-      }
+      if (!this.data.plans[dateStr]) return;
+      UI.confirm(`Clear schedule for ${formatDateDisplay(dateStr)}? Tasks will remain.`, () => {
+        delete this.data.plans[dateStr];
+        this.save(true);
+        UI.toast('Schedule cleared.', 'info');
+      });
     },
 
     toggleBlockCompleted(dateStr, blockId) {
@@ -427,25 +646,7 @@
           }
         }
         this.save(true);
-        UI.renderAll();
       }
-    },
-
-    moveBlock(dateStr, blockId, direction) {
-      const plan = this.data.plans[dateStr];
-      if (!plan || !plan.blocks) return;
-      const idx = plan.blocks.findIndex(b => b.id === blockId);
-      if (idx === -1) return;
-      const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
-      if (targetIdx < 0 || targetIdx >= plan.blocks.length) return;
-
-      const temp = plan.blocks[idx];
-      plan.blocks[idx] = plan.blocks[targetIdx];
-      plan.blocks[targetIdx] = temp;
-
-      this.save(false);
-      UI.renderPlanner();
-      UI.renderDashboard();
     },
 
     removeBlock(dateStr, blockId) {
@@ -453,1446 +654,1094 @@
       if (!plan || !plan.blocks) return;
       plan.blocks = plan.blocks.filter(b => b.id !== blockId);
       this.save(true);
-      UI.renderPlanner();
-      UI.renderDashboard();
-    },
-
-    updateBlock(dateStr, blockId, title, startTime, endTime, type) {
-      const plan = this.data.plans[dateStr];
-      if (!plan || !plan.blocks) return;
-      const block = plan.blocks.find(b => b.id === blockId);
-      if (block) {
-        block.title = title;
-        block.startTime = startTime;
-        block.endTime = endTime;
-        block.type = type;
-        const dur = timeStringToMinutes(endTime) - timeStringToMinutes(startTime);
-        block.durationMinutes = dur > 0 ? dur : block.durationMinutes;
-        this.save(true);
-        UI.renderPlanner();
-        UI.renderDashboard();
-      }
     }
   };
 
   // =========================================================================
-  // SCHEDULING ENGINE (REALISTIC ALGORITHM)
+  // SCHEDULING ENGINE (GAP-BASED DYNAMIC SCHEDULER)
   // =========================================================================
 
   const SchedulerEngine = {
-    /**
-     * Compute fixed commitments that fall on target date
-     */
-    getCommitmentsForDate(dateStr, commitmentsList) {
-      const targetDate = parseDateString(dateStr);
-      const dayOfWeek = targetDate.getDay(); // 0 = Sun, 1 = Mon...
-
-      return commitmentsList.filter(c => {
+    getCommitmentsForDate(dateStr, commitments) {
+      const d = parseDateString(dateStr);
+      const dayOfWeek = d.getDay();
+      return commitments.filter(c => {
         if (c.recurrence === 'recurring') {
           return Array.isArray(c.daysOfWeek) && c.daysOfWeek.includes(dayOfWeek);
-        } else if (c.recurrence === 'one-time') {
-          return c.date === dateStr;
         }
-        return false;
+        return c.date === dateStr;
       });
     },
 
-    /**
-     * Convert time strings (HH:MM) to interval ranges in minutes
-     */
-    buildBusyIntervals(dateStr, commitmentsList, sleepStart, sleepEnd) {
-      const dayCommitments = this.getCommitmentsForDate(dateStr, commitmentsList);
+    buildBusyIntervals(dateStr, commitments, sleepStart, sleepEnd) {
       const busy = [];
-
-      // Sleep interval: e.g., 23:00 to 06:30
-      // If sleep crosses midnight:
       const sleepStartMins = timeStringToMinutes(sleepStart);
       const sleepEndMins = timeStringToMinutes(sleepEnd);
 
+      // Sleep Interval
       if (sleepStartMins > sleepEndMins) {
-        // Night interval: e.g. 23:00 (1380) to 24:00 (1440)
-        busy.push({
-          start: sleepStartMins,
-          end: 1440,
-          title: 'Sleep Hours',
-          type: 'sleep',
-          isFixed: true
-        });
-        // Morning interval: 00:00 (0) to sleepEndMins (390)
-        busy.push({
-          start: 0,
-          end: sleepEndMins,
-          title: 'Sleep Hours',
-          type: 'sleep',
-          isFixed: true
-        });
+        busy.push({ start: sleepStartMins, end: 1440, title: 'Sleep', isFixed: true });
+        busy.push({ start: 0, end: sleepEndMins, title: 'Sleep', isFixed: true });
       } else {
-        busy.push({
-          start: sleepStartMins,
-          end: sleepEndMins,
-          title: 'Sleep Hours',
-          type: 'sleep',
-          isFixed: true
-        });
+        busy.push({ start: sleepStartMins, end: sleepEndMins, title: 'Sleep', isFixed: true });
       }
 
-      // Add user fixed commitments
-      dayCommitments.forEach(c => {
+      // Add day commitments
+      const dayComms = this.getCommitmentsForDate(dateStr, commitments);
+      dayComms.forEach(c => {
         const start = timeStringToMinutes(c.startTime);
         const end = timeStringToMinutes(c.endTime);
         if (end > start) {
-          busy.push({
-            start,
-            end,
-            title: c.title,
-            type: c.category || 'fixed',
-            commitmentId: c.id,
-            isFixed: true
-          });
+          busy.push({ start, end, title: c.title, category: c.category, isFixed: true });
         }
       });
 
-      // Sort busy intervals by start time
       busy.sort((a, b) => a.start - b.start);
       return busy;
     },
 
-    /**
-     * Compute free time gaps between a planning start window and end window (sleep start)
-     */
-    calculateFreeSlots(startWindowMins, endWindowMins, busyIntervals) {
-      const freeSlots = [];
-      let cursor = Math.max(0, startWindowMins);
+    calculateFreeSlots(startMins, endMins, busyIntervals) {
+      const slots = [];
+      let cursor = Math.max(0, startMins);
 
-      // Merge overlapping busy intervals
-      const mergedBusy = [];
-      busyIntervals.forEach(curr => {
-        if (!mergedBusy.length) {
-          mergedBusy.push({ ...curr });
-        } else {
-          const prev = mergedBusy[mergedBusy.length - 1];
-          if (curr.start <= prev.end) {
-            prev.end = Math.max(prev.end, curr.end);
-          } else {
-            mergedBusy.push({ ...curr });
-          }
+      // Merge overlapping busy blocks
+      const merged = [];
+      busyIntervals.forEach(b => {
+        if (!merged.length) merged.push({ ...b });
+        else {
+          const prev = merged[merged.length - 1];
+          if (b.start <= prev.end) prev.end = Math.max(prev.end, b.end);
+          else merged.push({ ...b });
         }
       });
 
-      mergedBusy.forEach(busy => {
-        if (busy.end <= cursor) return;
-        if (busy.start > cursor && busy.start < endWindowMins) {
-          const gapEnd = Math.min(busy.start, endWindowMins);
-          if (gapEnd - cursor >= 15) { // Minimum usable chunk is 15 minutes
-            freeSlots.push({ start: cursor, end: gapEnd, duration: gapEnd - cursor });
+      merged.forEach(b => {
+        if (b.end <= cursor) return;
+        if (b.start > cursor && b.start < endMins) {
+          const gapEnd = Math.min(b.start, endMins);
+          if (gapEnd - cursor >= 15) {
+            slots.push({ start: cursor, end: gapEnd, duration: gapEnd - cursor });
           }
         }
-        cursor = Math.max(cursor, busy.end);
+        cursor = Math.max(cursor, b.end);
       });
 
-      if (cursor < endWindowMins && (endWindowMins - cursor) >= 15) {
-        freeSlots.push({ start: cursor, end: endWindowMins, duration: endWindowMins - cursor });
+      if (cursor < endMins && (endMins - cursor) >= 15) {
+        slots.push({ start: cursor, end: endMins, duration: endMins - cursor });
       }
 
-      return freeSlots;
+      return slots;
     },
 
-    /**
-     * Sort tasks by Grade 11 realistic urgency:
-     * 1. Overdue or Due Today
-     * 2. Urgent Priority / Exam Prep (Quarter Exam, GP Weekly Exam)
-     * 3. Preferred study date matches target
-     * 4. High -> Medium -> Low
-     */
-    prioritizeTasks(tasksList, targetDateStr) {
-      return [...tasksList].sort((a, b) => {
-        const aIsDueToday = a.dueDate <= targetDateStr;
-        const bIsDueToday = b.dueDate <= targetDateStr;
-        if (aIsDueToday !== bIsDueToday) return aIsDueToday ? -1 : 1;
+    prioritizeTasks(tasks, targetDateStr) {
+      const pScore = { Urgent: 4, High: 3, Medium: 2, Low: 1 };
+      return [...tasks].sort((a, b) => {
+        const aDue = a.dueDate <= targetDateStr;
+        const bDue = b.dueDate <= targetDateStr;
+        if (aDue !== bDue) return aDue ? -1 : 1;
 
-        const priorityScore = { Urgent: 4, High: 3, Medium: 2, Low: 1 };
-        const aP = priorityScore[a.priority] || 2;
-        const bP = priorityScore[b.priority] || 2;
+        const aExam = (a.type && (a.type.includes('Exam') || a.type.includes('SAT'))) ? 1 : 0;
+        const bExam = (b.type && (b.type.includes('Exam') || b.type.includes('SAT'))) ? 1 : 0;
+        if (aExam !== bExam) return bExam - aExam;
 
-        const aExam = (a.type.includes('Exam') || a.type.includes('SAT')) ? 1 : 0;
-        const bExam = (b.type.includes('Exam') || b.type.includes('SAT')) ? 1 : 0;
+        const aP = pScore[a.priority] || 2;
+        const bP = pScore[b.priority] || 2;
+        if (aP !== bP) return bP - aP;
 
-        if (aP + aExam !== bP + bExam) {
-          return (bP + bExam) - (aP + aExam);
-        }
-
-        // Preferred study date
-        const aPref = a.preferredStudyDate === targetDateStr ? 1 : 0;
-        const bPref = b.preferredStudyDate === targetDateStr ? 1 : 0;
-        if (aPref !== bPref) return bPref - aPref;
-
-        // Due date ascending
-        if (a.dueDate !== b.dueDate) {
-          return a.dueDate.localeCompare(b.dueDate);
-        }
-
-        return (a.durationMinutes || 45) - (b.durationMinutes || 45);
+        return (a.dueDate || '').localeCompare(b.dueDate || '');
       });
     },
 
-    /**
-     * Core Algorithm: Generates schedule proposal
-     */
-    generatePlan({
-      dateStr,
-      startTimeStr,
-      tasksToSchedule,
-      commitments,
-      settings,
-      resumeFromMins = null
-    }) {
+    generatePlan({ dateStr, startTimeStr, tasksToSchedule, commitments, settings, resumeFromMins = null }) {
       const sleepStartMins = timeStringToMinutes(settings.sleepStart || '23:00');
       const sleepEndMins = timeStringToMinutes(settings.sleepEnd || '06:30');
-      const bufferMinutes = Number(settings.bufferMinutes) || 30;
-      const breakMinutes = Number(settings.breakDurationMinutes) || 10;
+      const bufferMins = Number(settings.bufferMinutes) || 30;
+      const breakMins = Number(settings.breakDurationMinutes) || 10;
       const maxBlockDuration = Number(settings.maxBlockDurationMinutes) || 50;
 
       let planStartMins = resumeFromMins !== null
         ? resumeFromMins
         : timeStringToMinutes(startTimeStr || settings.studyStartTime || '15:30');
 
-      // Adjust if start is before wake up
-      if (planStartMins < sleepEndMins) {
-        planStartMins = sleepEndMins;
-      }
+      if (planStartMins < sleepEndMins) planStartMins = sleepEndMins;
 
-      // 1. Gather busy intervals
-      const busyIntervals = this.buildBusyIntervals(dateStr, commitments, settings.sleepStart, settings.sleepEnd);
-
-      // 2. Calculate free slots between start and bedtime
-      const freeSlots = this.calculateFreeSlots(planStartMins, sleepStartMins, busyIntervals);
-
-      // 3. Sort tasks
+      const busy = this.buildBusyIntervals(dateStr, commitments, settings.sleepStart, settings.sleepEnd);
+      const freeSlots = this.calculateFreeSlots(planStartMins, sleepStartMins, busy);
       const sortedTasks = this.prioritizeTasks(tasksToSchedule, dateStr);
 
       const scheduleBlocks = [];
-      const scheduledTaskIds = new Set();
       const unscheduledTasks = [];
 
-      // Add fixed commitments occurring within the active study window to the timeline
-      const dayCommitments = this.getCommitmentsForDate(dateStr, commitments);
-      dayCommitments.forEach(c => {
-        const cStart = timeStringToMinutes(c.startTime);
-        const cEnd = timeStringToMinutes(c.endTime);
-        if (cEnd > planStartMins && cStart < sleepStartMins) {
+      // Add fixed commitments occurring inside study window to timeline
+      const dayComms = this.getCommitmentsForDate(dateStr, commitments);
+      dayComms.forEach(c => {
+        const start = timeStringToMinutes(c.startTime);
+        const end = timeStringToMinutes(c.endTime);
+        if (end > planStartMins && start < sleepStartMins) {
           scheduleBlocks.push({
             id: 'block_fixed_' + c.id,
             title: c.title,
             type: 'fixed',
-            category: c.category,
             startTime: c.startTime,
             endTime: c.endTime,
-            startMins: cStart,
-            endMins: cEnd,
-            durationMinutes: cEnd - cStart,
-            isFixed: true,
+            startMins: start,
+            endMins: end,
+            durationMinutes: end - start,
             completed: false
           });
         }
       });
 
-      // 4. Reserve buffer: Deduct bufferMinutes from the available time
-      let totalFreeMins = freeSlots.reduce((acc, slot) => acc + slot.duration, 0);
-      let effectiveBuffer = Math.min(bufferMinutes, Math.floor(totalFreeMins * 0.25)); // Buffer doesn't exceed 25% of day
-
-      // Study task allocation
-      let slotIndex = 0;
-      let currentSlotOffset = 0;
+      let slotIdx = 0;
+      let slotOffset = 0;
 
       for (const task of sortedTasks) {
-        let taskRemainingDuration = Number(task.durationMinutes) || 45;
-        let taskScheduled = false;
+        let taskRemain = Number(task.durationMinutes) || 45;
+        let scheduledAny = false;
 
-        while (slotIndex < freeSlots.length && taskRemainingDuration > 0) {
-          const slot = freeSlots[slotIndex];
-          const slotAvailableMins = (slot.end - slot.start) - currentSlotOffset;
+        while (slotIdx < freeSlots.length && taskRemain > 0) {
+          const slot = freeSlots[slotIdx];
+          const availableInSlot = (slot.end - slot.start) - slotOffset;
 
-          // If less than 15 minutes left in this slot, advance to next
-          if (slotAvailableMins < 15) {
-            slotIndex++;
-            currentSlotOffset = 0;
+          if (availableInSlot < 15) {
+            slotIdx++;
+            slotOffset = 0;
             continue;
           }
 
-          // Allocate either full task or max block duration
-          const chunkDuration = Math.min(taskRemainingDuration, maxBlockDuration, slotAvailableMins);
-
-          const blockStartMins = slot.start + currentSlotOffset;
-          const blockEndMins = blockStartMins + chunkDuration;
+          const chunk = Math.min(taskRemain, maxBlockDuration, availableInSlot);
+          const bStart = slot.start + slotOffset;
+          const bEnd = bStart + chunk;
 
           scheduleBlocks.push({
-            id: 'block_task_' + task.id + '_' + blockStartMins,
+            id: 'block_task_' + task.id + '_' + bStart,
             taskId: task.id,
             title: task.title,
             subject: task.subject,
-            taskType: task.type,
             type: 'study',
-            startTime: minutesToTimeString(blockStartMins),
-            endTime: minutesToTimeString(blockEndMins),
-            startMins: blockStartMins,
-            endMins: blockEndMins,
-            durationMinutes: chunkDuration,
-            isFixed: false,
+            startTime: minutesToTimeString(bStart),
+            endTime: minutesToTimeString(bEnd),
+            startMins: bStart,
+            endMins: bEnd,
+            durationMinutes: chunk,
             completed: task.status === 'Completed'
           });
 
-          taskRemainingDuration -= chunkDuration;
-          currentSlotOffset += chunkDuration;
-          taskScheduled = true;
-          scheduledTaskIds.add(task.id);
+          taskRemain -= chunk;
+          slotOffset += chunk;
+          scheduledAny = true;
 
-          // Add break if there's still room in the slot
-          const remainingInSlot = (slot.end - slot.start) - currentSlotOffset;
-          if (remainingInSlot >= breakMinutes && (taskRemainingDuration > 0 || slotIndex < freeSlots.length)) {
-            const breakStartMins = slot.start + currentSlotOffset;
-            const breakEndMins = breakStartMins + breakMinutes;
-
+          // Short break
+          const remainingInSlot = (slot.end - slot.start) - slotOffset;
+          if (remainingInSlot >= breakMins && (taskRemain > 0 || slotIdx < freeSlots.length)) {
             scheduleBlocks.push({
-              id: 'block_break_' + breakStartMins,
-              title: 'Short Break / Reset',
+              id: 'block_break_' + (slot.start + slotOffset),
+              title: 'Short Break',
               type: 'break',
-              startTime: minutesToTimeString(breakStartMins),
-              endTime: minutesToTimeString(breakEndMins),
-              startMins: breakStartMins,
-              endMins: breakEndMins,
-              durationMinutes: breakMinutes,
-              isBreak: true,
+              startTime: minutesToTimeString(slot.start + slotOffset),
+              endTime: minutesToTimeString(slot.start + slotOffset + breakMins),
+              startMins: slot.start + slotOffset,
+              endMins: slot.start + slotOffset + breakMins,
+              durationMinutes: breakMins,
               completed: false
             });
-
-            currentSlotOffset += breakMinutes;
+            slotOffset += breakMins;
           } else if (remainingInSlot < 15) {
-            slotIndex++;
-            currentSlotOffset = 0;
+            slotIdx++;
+            slotOffset = 0;
           }
         }
 
-        if (!taskScheduled || taskRemainingDuration > 0) {
+        if (!scheduledAny || taskRemain > 0) {
           unscheduledTasks.push({
             ...task,
-            reason: 'Insufficient study time before sleep hours or between commitments.'
+            reason: 'Insufficient study time before bedtime.'
           });
         }
       }
 
-      // Add emergency buffer block at the end of planned sessions if space permits
-      if (effectiveBuffer > 0 && slotIndex < freeSlots.length) {
-        const slot = freeSlots[slotIndex];
-        const slotAvailableMins = (slot.end - slot.start) - currentSlotOffset;
-        const bufDuration = Math.min(effectiveBuffer, slotAvailableMins);
-
-        if (bufDuration >= 15) {
-          const bufStart = slot.start + currentSlotOffset;
-          const bufEnd = bufStart + bufDuration;
-
+      // Buffer reservation
+      if (bufferMins > 0 && slotIdx < freeSlots.length) {
+        const slot = freeSlots[slotIdx];
+        const avail = (slot.end - slot.start) - slotOffset;
+        const buf = Math.min(bufferMins, avail);
+        if (buf >= 15) {
+          const bStart = slot.start + slotOffset;
           scheduleBlocks.push({
-            id: 'block_buffer_' + bufStart,
-            title: 'Unexpected HW Buffer & Flex Time',
+            id: 'block_buffer_' + bStart,
+            title: 'Buffer / Flex Time',
             type: 'buffer',
-            startTime: minutesToTimeString(bufStart),
-            endTime: minutesToTimeString(bufEnd),
-            startMins: bufStart,
-            endMins: bufEnd,
-            durationMinutes: bufDuration,
-            isBuffer: true,
+            startTime: minutesToTimeString(bStart),
+            endTime: minutesToTimeString(bStart + buf),
+            startMins: bStart,
+            endMins: bStart + buf,
+            durationMinutes: buf,
             completed: false
           });
         }
       }
 
-      // Sort all final blocks chronologically
       scheduleBlocks.sort((a, b) => a.startMins - b.startMins);
 
       return {
         date: dateStr,
         generatedAt: new Date().toISOString(),
         blocks: scheduleBlocks,
-        unscheduledTasks: unscheduledTasks,
-        totalStudyMins: scheduleBlocks.filter(b => b.type === 'study').reduce((a, b) => a + b.durationMinutes, 0),
-        totalFixedMins: scheduleBlocks.filter(b => b.type === 'fixed').reduce((a, b) => a + b.durationMinutes, 0),
-        totalBreakMins: scheduleBlocks.filter(b => b.type === 'break' || b.type === 'buffer').reduce((a, b) => a + b.durationMinutes, 0)
+        unscheduledTasks
       };
     },
 
-    /**
-     * Reschedule remaining tasks from current time
-     * Preserves completed blocks and past fixed commitments
-     */
     rescheduleRemaining({ dateStr, currentPlan, allTasks, commitments, settings }) {
       const now = new Date();
-      // Round current time up to nearest 5 minutes
       const currentMins = now.getHours() * 60 + Math.ceil(now.getMinutes() / 5) * 5;
 
-      const preservedBlocks = [];
+      const preserved = [];
       const completedTaskIds = new Set();
 
       if (currentPlan && Array.isArray(currentPlan.blocks)) {
         currentPlan.blocks.forEach(b => {
-          // Preserve blocks that completed OR started before current time
           if (b.completed || b.startMins < currentMins) {
-            preservedBlocks.push(b);
+            preserved.push(b);
             if (b.taskId) completedTaskIds.add(b.taskId);
           }
         });
       }
 
-      // Candidate tasks are all active incomplete tasks that haven't been completed yet
-      const candidateTasks = allTasks.filter(t => t.status !== 'Completed' && !completedTaskIds.has(t.id));
-
-      // Calculate proposal starting from currentMins
+      const candidates = allTasks.filter(t => t.status !== 'Completed' && !completedTaskIds.has(t.id));
       const proposal = this.generatePlan({
         dateStr,
         startTimeStr: minutesToTimeString(currentMins),
-        tasksToSchedule: candidateTasks,
+        tasksToSchedule: candidates,
         commitments,
         settings,
         resumeFromMins: currentMins
       });
 
-      // Combine preserved blocks with new future blocks
       const futureBlocks = proposal.blocks.filter(b => b.startMins >= currentMins);
-      const combinedBlocks = [...preservedBlocks, ...futureBlocks].sort((a, b) => a.startMins - b.startMins);
+      const combined = [...preserved, ...futureBlocks].sort((a, b) => a.startMins - b.startMins);
 
       return {
         date: dateStr,
         generatedAt: new Date().toISOString(),
-        blocks: combinedBlocks,
-        unscheduledTasks: proposal.unscheduledTasks,
-        totalStudyMins: combinedBlocks.filter(b => b.type === 'study').reduce((a, b) => a + b.durationMinutes, 0),
-        totalFixedMins: combinedBlocks.filter(b => b.type === 'fixed').reduce((a, b) => a + b.durationMinutes, 0),
-        totalBreakMins: combinedBlocks.filter(b => b.type === 'break' || b.type === 'buffer').reduce((a, b) => a + b.durationMinutes, 0)
+        blocks: combined,
+        unscheduledTasks: proposal.unscheduledTasks
       };
     }
   };
 
   // =========================================================================
-  // USER INTERFACE & RENDERING CONTROLLER
+  // USER INTERFACE (NOTION-INSPIRED MINIMALIST DESIGN)
   // =========================================================================
 
   const UI = {
     init() {
+      State.init();
+      CloudSync.init();
+
+      // Apply saved theme (Default is light)
+      const theme = State.data.settings.theme || 'light';
+      this.applyTheme(theme);
+
+      // Guard: only bind DOM if elements exist
+      if (!document.getElementById('btn-today-add-task')) return;
+
       this.bindEvents();
-      this.renderHeaderDate();
       this.renderAll();
-      this.setupKeyboardShortcuts();
     },
 
     bindEvents() {
-      // Navigation Tabs
-      document.querySelectorAll('.nav-btn').forEach(btn => {
+      // Navigation Tabs (Desktop Sidebar + Mobile Bottom Bar)
+      document.querySelectorAll('[data-tab]').forEach(btn => {
         btn.addEventListener('click', (e) => {
           const tab = e.currentTarget.getAttribute('data-tab');
           this.switchTab(tab);
         });
       });
 
-      // Header Quick Actions
-      document.getElementById('btn-quick-add-task').addEventListener('click', () => this.openTaskModal());
-      document.getElementById('btn-quick-plan').addEventListener('click', () => this.openPlanGenerator(getTodayDateString()));
-
-      // Banner CTA
-      document.getElementById('btn-banner-plan').addEventListener('click', () => this.openPlanGenerator(getTodayDateString()));
-
-      // Dashboard Shortcuts
-      document.getElementById('dash-create-plan-btn').addEventListener('click', () => this.openPlanGenerator(getTodayDateString()));
-      document.getElementById('dash-view-all-tasks-btn').addEventListener('click', () => this.switchTab('tasks'));
-      document.getElementById('dash-manage-commitments-btn').addEventListener('click', () => this.switchTab('commitments'));
-      document.getElementById('dash-reschedule-btn').addEventListener('click', () => this.triggerReschedule(getTodayDateString()));
-
-      // Planner Date Controls
-      const planDateInput = document.getElementById('plan-date-input');
-      planDateInput.value = State.selectedPlannerDate;
-      planDateInput.addEventListener('change', (e) => {
-        State.selectedPlannerDate = e.target.value;
-        this.renderPlanner();
+      // Quick Add Task Buttons
+      ['btn-sidebar-add-task', 'btn-mobile-add-task', 'btn-today-add-task', 'btn-tasks-new'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('click', () => this.openTaskModal());
       });
 
-      document.getElementById('plan-today-btn').addEventListener('click', () => {
-        State.selectedPlannerDate = getTodayDateString();
-        planDateInput.value = State.selectedPlannerDate;
-        this.renderPlanner();
-      });
+      // Plan My Day Actions
+      const btnTodayPlan = document.getElementById('btn-today-plan');
+      if (btnTodayPlan) btnTodayPlan.addEventListener('click', () => this.openPlanGenerator(getTodayDateString()));
 
-      document.getElementById('plan-prev-day').addEventListener('click', () => {
-        State.selectedPlannerDate = offsetDateString(State.selectedPlannerDate, -1);
-        planDateInput.value = State.selectedPlannerDate;
-        this.renderPlanner();
-      });
+      const btnTodayReschedule = document.getElementById('btn-today-reschedule');
+      if (btnTodayReschedule) btnTodayReschedule.addEventListener('click', () => this.triggerReschedule(getTodayDateString()));
 
-      document.getElementById('plan-next-day').addEventListener('click', () => {
-        State.selectedPlannerDate = offsetDateString(State.selectedPlannerDate, 1);
-        planDateInput.value = State.selectedPlannerDate;
-        this.renderPlanner();
-      });
+      const btnTodayAdjust = document.getElementById('btn-today-adjust-plan');
+      if (btnTodayAdjust) btnTodayAdjust.addEventListener('click', () => this.openPlanGenerator(getTodayDateString()));
 
-      // Planner Actions
-      document.getElementById('btn-generate-plan').addEventListener('click', () => {
-        this.openPlanGenerator(State.selectedPlannerDate);
-      });
-
-      document.getElementById('btn-reschedule-remaining').addEventListener('click', () => {
-        this.triggerReschedule(State.selectedPlannerDate);
-      });
-
-      document.getElementById('btn-clear-plan').addEventListener('click', () => {
-        State.clearDailyPlan(State.selectedPlannerDate);
-      });
-
-      // Tasks View Actions
-      document.getElementById('btn-add-task-main').addEventListener('click', () => this.openTaskModal());
-      document.getElementById('btn-reset-filters').addEventListener('click', () => this.resetTaskFilters());
+      const btnGotoCal = document.getElementById('btn-today-goto-calendar');
+      if (btnGotoCal) btnGotoCal.addEventListener('click', () => this.switchTab('calendar'));
 
       // Task Filter Listeners
-      const searchInput = document.getElementById('task-search-input');
-      searchInput.addEventListener('input', (e) => {
-        State.taskFilters.search = e.target.value.toLowerCase().trim();
-        this.renderTasks();
+      const searchInput = document.getElementById('tasks-search');
+      if (searchInput) {
+        searchInput.addEventListener('input', e => {
+          State.taskFilters.search = e.target.value.toLowerCase().trim();
+          this.renderTasksTable();
+        });
+      }
+
+      document.querySelectorAll('.filter-pill').forEach(pill => {
+        pill.addEventListener('click', e => {
+          document.querySelectorAll('.filter-pill').forEach(p => p.classList.remove('active'));
+          e.currentTarget.classList.add('active');
+          State.taskFilters.status = e.currentTarget.getAttribute('data-filter-status');
+          this.renderTasksTable();
+        });
       });
 
-      document.getElementById('filter-status').addEventListener('change', (e) => {
-        State.taskFilters.status = e.target.value;
-        this.renderTasks();
+      const selSubject = document.getElementById('tasks-filter-subject');
+      if (selSubject) {
+        selSubject.addEventListener('change', e => {
+          State.taskFilters.subject = e.target.value;
+          this.renderTasksTable();
+        });
+      }
+
+      const selPriority = document.getElementById('tasks-filter-priority');
+      if (selPriority) {
+        selPriority.addEventListener('change', e => {
+          State.taskFilters.priority = e.target.value;
+          this.renderTasksTable();
+        });
+      }
+
+      const selSort = document.getElementById('tasks-sort-by');
+      if (selSort) {
+        selSort.addEventListener('change', e => {
+          State.taskFilters.sort = e.target.value;
+          this.renderTasksTable();
+        });
+      }
+
+      // Calendar Controls
+      const calDatePicker = document.getElementById('calendar-date-picker');
+      if (calDatePicker) {
+        calDatePicker.value = State.selectedCalendarDate;
+        calDatePicker.addEventListener('change', e => {
+          State.selectedCalendarDate = e.target.value;
+          this.renderCalendar();
+        });
+      }
+
+      document.getElementById('cal-prev-day')?.addEventListener('click', () => {
+        State.selectedCalendarDate = offsetDateString(State.selectedCalendarDate, -1);
+        if (calDatePicker) calDatePicker.value = State.selectedCalendarDate;
+        this.renderCalendar();
       });
 
-      document.getElementById('filter-subject').addEventListener('change', (e) => {
-        State.taskFilters.subject = e.target.value;
-        this.renderTasks();
+      document.getElementById('cal-next-day')?.addEventListener('click', () => {
+        State.selectedCalendarDate = offsetDateString(State.selectedCalendarDate, 1);
+        if (calDatePicker) calDatePicker.value = State.selectedCalendarDate;
+        this.renderCalendar();
       });
 
-      document.getElementById('filter-type').addEventListener('change', (e) => {
-        State.taskFilters.type = e.target.value;
-        this.renderTasks();
+      document.getElementById('cal-today-btn')?.addEventListener('click', () => {
+        State.selectedCalendarDate = getTodayDateString();
+        if (calDatePicker) calDatePicker.value = State.selectedCalendarDate;
+        this.renderCalendar();
       });
 
-      document.getElementById('filter-priority').addEventListener('change', (e) => {
-        State.taskFilters.priority = e.target.value;
-        this.renderTasks();
+      document.getElementById('btn-cal-plan-day')?.addEventListener('click', () => {
+        this.openPlanGenerator(State.selectedCalendarDate);
       });
 
-      document.getElementById('filter-sort').addEventListener('change', (e) => {
-        State.taskFilters.sort = e.target.value;
-        this.renderTasks();
+      document.getElementById('btn-calendar-add-commitment')?.addEventListener('click', () => {
+        this.openCommitmentModal();
       });
 
-      // Commitments View Actions
-      document.getElementById('btn-add-commitment-main').addEventListener('click', () => this.openCommitmentModal());
+      // Settings Theme Toggle
+      document.getElementById('sidebar-theme-toggle')?.addEventListener('click', () => {
+        const currentTheme = State.data.settings.theme || 'light';
+        const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+        State.data.settings.theme = newTheme;
+        State.save(false);
+        this.applyTheme(newTheme);
+      });
 
-      document.getElementById('commitment-day-tabs').addEventListener('click', (e) => {
-        if (e.target.classList.contains('day-tab-btn')) {
-          document.querySelectorAll('.day-tab-btn').forEach(b => b.classList.remove('active'));
-          e.target.classList.add('active');
-          State.commitmentFilterDay = e.target.getAttribute('data-day');
-          this.renderCommitments();
+      // Settings Google Auth & Sync
+      document.getElementById('btn-google-signin')?.addEventListener('click', () => CloudSync.signInWithGoogle());
+      document.getElementById('btn-google-signout')?.addEventListener('click', () => CloudSync.signOut());
+      document.getElementById('btn-migrate-local-data')?.addEventListener('click', () => CloudSync.migrateLocalDataToCloud());
+
+      // Settings Firebase Accordion
+      document.getElementById('btn-toggle-firebase-config')?.addEventListener('click', () => {
+        const content = document.getElementById('content-firebase-config');
+        const chevron = document.getElementById('chevron-firebase');
+        if (content) {
+          const isOpen = content.style.display !== 'none';
+          content.style.display = isOpen ? 'none' : 'block';
+          if (chevron) chevron.textContent = isOpen ? '▾' : '▴';
         }
       });
 
-      // Settings & Backup Listeners
-      document.getElementById('btn-export-backup').addEventListener('click', () => {
-        Storage.exportJSON(State.data);
+      document.getElementById('btn-save-custom-firebase')?.addEventListener('click', () => {
+        const val = document.getElementById('custom-firebase-config-input')?.value.trim();
+        if (val) {
+          try {
+            const parsed = JSON.parse(val);
+            localStorage.setItem(FIREBASE_CONFIG_KEY, JSON.stringify(parsed));
+            this.toast('Custom Firebase configuration saved. Please reload page.', 'success');
+          } catch (e) {
+            this.toast('Invalid JSON format for Firebase config.', 'danger');
+          }
+        }
       });
 
-      document.getElementById('file-import-backup').addEventListener('change', (e) => {
-        this.handleBackupImport(e);
+      document.getElementById('btn-reset-firebase')?.addEventListener('click', () => {
+        localStorage.removeItem(FIREBASE_CONFIG_KEY);
+        this.toast('Reset to default configuration. Please reload page.', 'info');
       });
 
-      document.getElementById('settings-preferences-form').addEventListener('submit', (e) => {
+      // Settings Routine Preferences Form
+      document.getElementById('form-settings-routine')?.addEventListener('submit', e => {
         e.preventDefault();
-        this.savePreferences();
+        State.data.settings.sleepStart = document.getElementById('set-sleep-start').value;
+        State.data.settings.sleepEnd = document.getElementById('set-sleep-end').value;
+        State.data.settings.bufferMinutes = Number(document.getElementById('set-buffer-mins').value);
+        State.data.settings.breakDurationMinutes = Number(document.getElementById('set-break-mins').value);
+        State.save(false);
+        this.toast('Routine preferences saved.', 'success');
       });
 
-      document.getElementById('btn-load-sample-data').addEventListener('click', () => {
-        this.confirm('Load Grade 11 starter tasks and lesson schedule? This will append starter items.', () => {
-          State.data.commitments = [...STARTER_COMMITMENTS];
-          State.data.tasks = [...State.data.tasks, ...STARTER_TASKS];
-          State.save(true);
-          this.renderAll();
-          this.toast('Starter template loaded.', 'success');
-        });
-      });
-
-      document.getElementById('btn-reset-all-data').addEventListener('click', () => {
-        this.confirm('WARNING: Are you sure you want to reset ALL StudyFlow data? This cannot be undone unless you have an exported backup.', () => {
+      // Settings Backup & Reset
+      document.getElementById('btn-export-backup')?.addEventListener('click', () => Storage.exportJSON(State.data));
+      document.getElementById('file-import-input')?.addEventListener('change', e => this.handleImportBackup(e));
+      document.getElementById('btn-reset-data')?.addEventListener('click', () => {
+        this.confirm('Reset local tasks and restore starter template?', () => {
           State.data = Storage.createInitialData();
           State.save(true);
-          this.renderAll();
-          this.toast('All data reset to defaults.', 'warning');
+          this.toast('Reset to default template.', 'info');
         });
       });
 
-      // Task Form Submit
-      document.getElementById('form-task').addEventListener('submit', (e) => {
+      // Task Form: Expandable "More Options" toggle
+      document.getElementById('btn-toggle-task-more')?.addEventListener('click', () => {
+        const content = document.getElementById('content-task-more');
+        const label = document.getElementById('label-task-more');
+        if (content) {
+          const isClosed = content.style.display === 'none';
+          content.style.display = isClosed ? 'block' : 'none';
+          if (label) label.textContent = isClosed ? '▾ Less options' : '▸ More options (type, study date, notes)';
+        }
+      });
+
+      document.getElementById('form-task')?.addEventListener('submit', e => {
         e.preventDefault();
         this.saveTaskFromModal();
       });
 
-      // Commitment Form Submit
-      document.getElementById('form-commitment').addEventListener('submit', (e) => {
+      // Commitment Form
+      document.getElementById('form-commitment')?.addEventListener('submit', e => {
         e.preventDefault();
         this.saveCommitmentFromModal();
       });
 
-      document.getElementById('commitment-recurrence').addEventListener('change', (e) => {
-        const isRecurring = e.target.value === 'recurring';
-        document.getElementById('group-commitment-days').style.display = isRecurring ? 'block' : 'none';
-        document.getElementById('group-commitment-date').style.display = isRecurring ? 'none' : 'block';
+      document.getElementById('commitment-recurrence')?.addEventListener('change', e => {
+        const isRec = e.target.value === 'recurring';
+        document.getElementById('group-commitment-days').style.display = isRec ? 'block' : 'none';
+        document.getElementById('group-commitment-date').style.display = isRec ? 'none' : 'block';
       });
 
-      // Generator Modal Buttons
-      document.getElementById('btn-select-all-tasks').addEventListener('click', () => {
-        document.querySelectorAll('#generator-task-checklist input[type="checkbox"]').forEach(c => c.checked = true);
+      // Plan Generator Modal
+      document.getElementById('btn-gen-select-all')?.addEventListener('click', () => {
+        document.querySelectorAll('#gen-tasks-checklist input').forEach(c => c.checked = true);
       });
 
-      document.getElementById('btn-select-due-only').addEventListener('click', () => {
-        const targetDate = document.getElementById('gen-plan-date').value;
-        document.querySelectorAll('#generator-task-checklist input[type="checkbox"]').forEach(c => {
-          const due = c.getAttribute('data-due');
-          c.checked = (due <= targetDate);
-        });
-      });
-
-      document.getElementById('btn-calculate-preview').addEventListener('click', () => {
-        this.calculateAndPreviewProposal();
-      });
-
-      document.getElementById('btn-apply-plan').addEventListener('click', () => {
-        this.applyProposedPlan();
-      });
-
-      // Edit Block Form
-      document.getElementById('form-edit-block').addEventListener('submit', (e) => {
-        e.preventDefault();
-        this.saveEditedBlock();
-      });
+      document.getElementById('btn-calc-preview')?.addEventListener('click', () => this.calculatePlanPreview());
+      document.getElementById('btn-apply-plan')?.addEventListener('click', () => this.applyPlan());
 
       // Modal Close Handlers
-      document.querySelectorAll('[data-close-modal]').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-          const modal = e.target.closest('.modal-backdrop');
-          if (modal) this.closeModal(modal.id);
+      document.querySelectorAll('[data-close-modal]').forEach(b => {
+        b.addEventListener('click', e => {
+          const m = e.target.closest('.modal-backdrop');
+          if (m) this.closeModal(m.id);
         });
       });
 
-      // Close modal on backdrop click
-      document.querySelectorAll('.modal-backdrop').forEach(backdrop => {
-        backdrop.addEventListener('click', (e) => {
-          if (e.target === backdrop) {
-            this.closeModal(backdrop.id);
-          }
+      document.querySelectorAll('.modal-backdrop').forEach(bd => {
+        bd.addEventListener('click', e => {
+          if (e.target === bd) this.closeModal(bd.id);
         });
+      });
+
+      window.addEventListener('keydown', e => {
+        if (e.key === 'Escape') {
+          document.querySelectorAll('.modal-backdrop.active').forEach(m => this.closeModal(m.id));
+        }
       });
     },
 
-    setupKeyboardShortcuts() {
-      window.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-          document.querySelectorAll('.modal-backdrop.active').forEach(m => {
-            this.closeModal(m.id);
-          });
-        }
-      });
+    applyTheme(theme) {
+      const isDark = theme === 'dark';
+      document.body.classList.toggle('theme-dark', isDark);
+      document.body.classList.toggle('theme-light', !isDark);
+
+      const icon = document.getElementById('theme-toggle-icon');
+      const label = document.getElementById('theme-toggle-label');
+      if (icon) icon.textContent = isDark ? '☀️' : '🌙';
+      if (label) label.textContent = isDark ? 'Light Mode' : 'Dark Mode';
     },
 
     switchTab(tabName) {
       State.currentTab = tabName;
-      document.querySelectorAll('.nav-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.getAttribute('data-tab') === tabName);
-      });
-      document.querySelectorAll('.view-panel').forEach(panel => {
-        panel.classList.toggle('active', panel.id === `view-${tabName}`);
+
+      // Update Desktop Sidebar
+      document.querySelectorAll('.sidebar-nav-item').forEach(b => {
+        b.classList.toggle('active', b.getAttribute('data-tab') === tabName);
       });
 
-      if (tabName === 'dashboard') this.renderDashboard();
-      if (tabName === 'planner') this.renderPlanner();
-      if (tabName === 'tasks') this.renderTasks();
-      if (tabName === 'commitments') this.renderCommitments();
+      // Update Mobile Bottom Nav
+      document.querySelectorAll('.bottom-nav-item').forEach(b => {
+        b.classList.toggle('active', b.getAttribute('data-tab') === tabName);
+      });
+
+      // Update View Panels
+      document.querySelectorAll('.view-panel').forEach(p => {
+        p.classList.toggle('active', p.id === `view-${tabName}`);
+      });
+
+      if (tabName === 'today') this.renderToday();
+      if (tabName === 'tasks') this.renderTasksTable();
+      if (tabName === 'calendar') this.renderCalendar();
       if (tabName === 'settings') this.renderSettings();
     },
 
-    renderHeaderDate() {
-      const today = new Date();
-      const options = { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' };
-      const dateText = today.toLocaleDateString('en-US', options);
-      const headerDateEl = document.getElementById('header-date-text');
-      if (headerDateEl) headerDateEl.textContent = dateText;
-    },
-
     renderAll() {
-      this.updateStorageMeta(State.data);
-      this.renderDashboard();
-      this.renderPlanner();
-      this.renderTasks();
-      this.renderCommitments();
+      this.renderToday();
+      this.renderTasksTable();
+      this.renderCalendar();
       this.renderSettings();
-      this.updateCounters();
-    },
 
-    updateCounters() {
-      const activeTasksCount = State.data.tasks.filter(t => t.status !== 'Completed').length;
-      const counterEl = document.getElementById('nav-tasks-count');
-      if (counterEl) counterEl.textContent = activeTasksCount;
-
-      const todayPlan = State.data.plans[getTodayDateString()];
-      const planStatusEl = document.getElementById('nav-plan-status');
-      if (planStatusEl) {
-        planStatusEl.style.display = todayPlan && todayPlan.blocks && todayPlan.blocks.length ? 'inline-block' : 'none';
+      const taskCountBadge = document.getElementById('sidebar-task-count');
+      if (taskCountBadge) {
+        const active = State.data.tasks.filter(t => t.status !== 'Completed').length;
+        taskCountBadge.textContent = active;
       }
     },
 
     // =======================================================================
-    // DASHBOARD RENDERING
+    // 1. TODAY VIEW
     // =======================================================================
 
-    renderDashboard() {
+    renderToday() {
       const todayStr = getTodayDateString();
-      const tasks = State.data.tasks;
-
-      // Pending tasks
-      const pendingTasks = tasks.filter(t => t.status !== 'Completed');
-      const totalPendingMins = pendingTasks.reduce((sum, t) => sum + (Number(t.durationMinutes) || 0), 0);
-      document.getElementById('stat-pending-tasks').textContent = pendingTasks.length;
-      document.getElementById('stat-pending-duration').textContent = `${(totalPendingMins / 60).toFixed(1)} hrs estimated`;
-
-      // Due today
-      const dueToday = tasks.filter(t => t.dueDate === todayStr);
-      const dueTodayPending = dueToday.filter(t => t.status !== 'Completed');
-      const dueTodayCompleted = dueToday.filter(t => t.status === 'Completed');
-      document.getElementById('stat-due-today').textContent = dueTodayPending.length;
-      document.getElementById('stat-due-today-sub').textContent = `${dueTodayCompleted.length} completed`;
-
-      // Overdue
-      const overdue = tasks.filter(t => t.dueDate < todayStr && t.status !== 'Completed');
-      const overdueEl = document.getElementById('stat-overdue-tasks');
-      overdueEl.textContent = overdue.length;
-      const overdueCard = document.getElementById('metric-card-overdue');
-      if (overdue.length > 0) {
-        overdueCard.style.borderColor = 'rgba(244, 63, 94, 0.4)';
-      } else {
-        overdueCard.style.borderColor = '';
+      const dateHeading = document.getElementById('today-date-heading');
+      if (dateHeading) {
+        dateHeading.textContent = new Date().toLocaleDateString('en-US', {
+          weekday: 'long', month: 'long', day: 'numeric'
+        });
       }
 
-      // Completion Percentage
-      const totalTasksCount = tasks.length;
-      const completedTasksCount = tasks.filter(t => t.status === 'Completed').length;
-      const completionPct = totalTasksCount > 0 ? Math.round((completedTasksCount / totalTasksCount) * 100) : 0;
-      document.getElementById('stat-completion-pct').textContent = `${completionPct}%`;
-      document.getElementById('stat-progress-fill').style.width = `${completionPct}%`;
+      const tasks = State.data.tasks;
+      const dueToday = tasks.filter(t => t.dueDate === todayStr || t.dueDate < todayStr);
+      const dueTodayPending = dueToday.filter(t => t.status !== 'Completed');
+      const dueTodayDone = dueToday.filter(t => t.status === 'Completed');
 
-      // Today's Active Plan Widget
+      // Progress Line
+      const totalDueCount = dueToday.length;
+      const doneCount = dueTodayDone.length;
+      const pct = totalDueCount > 0 ? Math.round((doneCount / totalDueCount) * 100) : 100;
+
+      const progressLabel = document.getElementById('today-progress-label');
+      const progressPct = document.getElementById('today-progress-pct');
+      const progressFill = document.getElementById('today-progress-fill');
+
+      if (progressLabel) progressLabel.textContent = `${doneCount} of ${totalDueCount} tasks completed`;
+      if (progressPct) progressPct.textContent = `${pct}%`;
+      if (progressFill) progressFill.style.width = `${pct}%`;
+
+      const summaryText = document.getElementById('today-summary-text');
+      if (summaryText) {
+        summaryText.textContent = dueTodayPending.length > 0
+          ? `${dueTodayPending.length} pending task(s) due today.`
+          : 'You are caught up on tasks due today.';
+      }
+
+      // Today's Plan Timeline
+      const scheduleList = document.getElementById('today-schedule-list');
+      const planStatusBadge = document.getElementById('today-plan-status-badge');
+      const btnReschedule = document.getElementById('btn-today-reschedule');
+      const btnAdjust = document.getElementById('btn-today-adjust-plan');
+
       const todayPlan = State.data.plans[todayStr];
-      const planTimelineEl = document.getElementById('dash-plan-timeline');
-      const planStatusBadge = document.getElementById('dash-plan-status-badge');
-      const rescheduleBtn = document.getElementById('dash-reschedule-btn');
 
       if (todayPlan && Array.isArray(todayPlan.blocks) && todayPlan.blocks.length > 0) {
-        planStatusBadge.className = 'badge badge-success';
-        planStatusBadge.textContent = 'Active Plan';
-        rescheduleBtn.style.display = 'inline-flex';
+        if (planStatusBadge) {
+          planStatusBadge.className = 'badge badge-high';
+          planStatusBadge.textContent = 'Active Plan';
+        }
+        if (btnReschedule) btnReschedule.style.display = 'inline-block';
+        if (btnAdjust) btnAdjust.style.display = 'inline-block';
 
-        planTimelineEl.innerHTML = todayPlan.blocks.slice(0, 5).map(b => `
-          <div class="compact-item ${b.completed ? 'task-completed' : ''}">
-            <div class="compact-item-left">
-              <span class="badge ${b.type === 'study' ? 'badge-primary' : (b.type === 'break' ? 'badge-success' : 'badge-info')}">
-                ${escapeHTML(b.startTime)}
-              </span>
-              <div>
-                <div class="compact-item-title">${escapeHTML(b.title)}</div>
-                <div class="compact-item-sub">${b.durationMinutes} mins · ${escapeHTML(b.type.toUpperCase())}</div>
+        if (scheduleList) {
+          scheduleList.innerHTML = todayPlan.blocks.map(b => `
+            <div class="timeline-item">
+              <div class="item-left">
+                ${b.type === 'study' ? `
+                  <input type="checkbox" class="check-toggle"
+                         ${b.completed ? 'checked' : ''}
+                         data-toggle-block="${escapeHTML(b.id)}">
+                ` : '<span style="font-size:0.9rem;">🔒</span>'}
+                <span class="item-time">${escapeHTML(b.startTime)} - ${escapeHTML(b.endTime)}</span>
+                <span class="item-title ${b.completed ? 'completed' : ''}">${escapeHTML(b.title)}</span>
+                ${b.subject ? `<span class="badge badge-subject">${escapeHTML(b.subject)}</span>` : ''}
+              </div>
+              <div class="item-right">
+                <span class="text-sm text-subtle">${b.durationMinutes}m</span>
+                <button type="button" class="btn btn-ghost btn-xs text-danger" data-remove-block="${escapeHTML(b.id)}" title="Remove block">&times;</button>
               </div>
             </div>
-            ${b.type === 'study' ? `
-              <input type="checkbox" class="task-checkbox-custom"
-                     ${b.completed ? 'checked' : ''}
-                     title="Toggle completion"
-                     data-toggle-block="${escapeHTML(b.id)}">
-            ` : ''}
-          </div>
-        `).join('');
+          `).join('');
 
-        if (todayPlan.blocks.length > 5) {
-          planTimelineEl.innerHTML += `
-            <div style="text-align:center; padding: 0.5rem;">
-              <button type="button" class="btn btn-ghost btn-xs" id="dash-view-full-plan-btn">
-                + ${todayPlan.blocks.length - 5} more blocks. View Full Timeline &rarr;
-              </button>
-            </div>
-          `;
-          document.getElementById('dash-view-full-plan-btn')?.addEventListener('click', () => {
-            State.selectedPlannerDate = todayStr;
-            this.switchTab('planner');
+          scheduleList.querySelectorAll('[data-toggle-block]').forEach(cb => {
+            cb.addEventListener('change', e => {
+              const bId = e.target.getAttribute('data-toggle-block');
+              State.toggleBlockCompleted(todayStr, bId);
+            });
+          });
+
+          scheduleList.querySelectorAll('[data-remove-block]').forEach(btn => {
+            btn.addEventListener('click', e => {
+              const bId = e.currentTarget.getAttribute('data-remove-block');
+              State.removeBlock(todayStr, bId);
+            });
           });
         }
       } else {
-        planStatusBadge.className = 'badge';
-        planStatusBadge.textContent = 'No Plan Generated';
-        rescheduleBtn.style.display = 'none';
+        if (planStatusBadge) {
+          planStatusBadge.className = 'badge';
+          planStatusBadge.textContent = 'No plan yet';
+        }
+        if (btnReschedule) btnReschedule.style.display = 'none';
+        if (btnAdjust) btnAdjust.style.display = 'none';
 
-        planTimelineEl.innerHTML = `
-          <div class="empty-state" style="padding: 1.5rem 1rem;">
-            <div class="empty-state-icon">⚡</div>
-            <div class="empty-state-title">No plan created for today</div>
-            <p class="empty-state-text">Generate a realistic study plan around your fixed lessons and sleep routine.</p>
-            <button type="button" class="btn btn-primary btn-sm" id="dash-empty-plan-cta">Plan Today</button>
-          </div>
-        `;
-        document.getElementById('dash-empty-plan-cta')?.addEventListener('click', () => {
-          this.openPlanGenerator(todayStr);
-        });
-      }
-
-      // Urgent & Due Today List
-      const urgentDueListEl = document.getElementById('dash-due-tasks-list');
-      const urgentAndDue = tasks.filter(t =>
-        t.status !== 'Completed' && (t.dueDate <= todayStr || t.priority === 'Urgent')
-      );
-      document.getElementById('dash-urgent-count-badge').textContent = urgentAndDue.length;
-
-      if (urgentAndDue.length === 0) {
-        urgentDueListEl.innerHTML = `
-          <div class="empty-state" style="padding: 1.5rem 1rem;">
-            <div class="empty-state-icon">🎉</div>
-            <div class="empty-state-title">No urgent tasks due today</div>
-            <p class="empty-state-text">You are caught up on immediate deadlines.</p>
-          </div>
-        `;
-      } else {
-        urgentDueListEl.innerHTML = urgentAndDue.slice(0, 5).map(t => `
-          <div class="compact-item">
-            <div class="compact-item-left">
-              <input type="checkbox" class="task-checkbox-custom" data-toggle-task="${escapeHTML(t.id)}">
-              <div>
-                <div class="compact-item-title">${escapeHTML(t.title)}</div>
-                <div class="compact-item-sub">
-                  ${escapeHTML(t.subject)} · Due: ${formatDateDisplay(t.dueDate)}
-                  ${t.dueDate < todayStr ? '<span class="text-danger font-bold"> (OVERDUE)</span>' : ''}
-                </div>
-              </div>
+        if (scheduleList) {
+          scheduleList.innerHTML = `
+            <div class="empty-state">
+              <div class="empty-state-title">No schedule planned for today</div>
+              <p class="empty-state-text">Press "Plan My Day" to generate a suggested timeline around your lessons and bedtime.</p>
+              <button type="button" class="btn btn-primary btn-sm" id="btn-empty-today-plan">Plan My Day</button>
             </div>
-            <span class="badge priority-${t.priority.toLowerCase()}">${escapeHTML(t.priority)}</span>
-          </div>
-        `).join('');
+          `;
+          document.getElementById('btn-empty-today-plan')?.addEventListener('click', () => {
+            this.openPlanGenerator(todayStr);
+          });
+        }
       }
 
-      // Upcoming Exams (Next 14 days)
-      const examsListEl = document.getElementById('dash-exams-list');
-      const examTasks = tasks.filter(t => {
-        const isExamType = t.type.includes('Exam') || t.type.includes('SAT');
-        const diffDays = daysDifference(todayStr, t.dueDate);
-        return isExamType && diffDays >= 0 && diffDays <= 14;
-      }).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+      // Urgent & Due Today Checklist
+      const tasksChecklist = document.getElementById('today-tasks-checklist');
+      const urgentCounter = document.getElementById('today-urgent-counter');
+      if (urgentCounter) urgentCounter.textContent = dueTodayPending.length;
 
-      if (examTasks.length === 0) {
-        examsListEl.innerHTML = `
-          <div class="empty-state" style="padding: 1.5rem 1rem;">
-            <div class="empty-state-icon">📖</div>
-            <div class="empty-state-title">No exams scheduled in next 14 days</div>
-            <p class="empty-state-text">Add SAT or Quarter Exam prep tasks to track them here.</p>
-          </div>
-        `;
-      } else {
-        examsListEl.innerHTML = examTasks.map(e => `
-          <div class="compact-item">
-            <div class="compact-item-left">
-              <span class="badge badge-accent">${escapeHTML(e.type)}</span>
-              <div>
-                <div class="compact-item-title">${escapeHTML(e.title)}</div>
-                <div class="compact-item-sub">${escapeHTML(e.subject)} · In ${daysDifference(todayStr, e.dueDate)} days (${formatDateDisplay(e.dueDate)})</div>
+      if (tasksChecklist) {
+        if (dueToday.length === 0) {
+          tasksChecklist.innerHTML = `<div class="empty-state"><p class="text-subtle text-sm">No tasks due today.</p></div>`;
+        } else {
+          tasksChecklist.innerHTML = dueToday.map(t => `
+            <div class="task-row-item">
+              <div class="item-left">
+                <input type="checkbox" class="check-toggle"
+                       ${t.status === 'Completed' ? 'checked' : ''}
+                       data-toggle-task="${escapeHTML(t.id)}">
+                <span class="item-title ${t.status === 'Completed' ? 'completed' : ''}">${escapeHTML(t.title)}</span>
+                <span class="badge badge-subject">${escapeHTML(t.subject)}</span>
               </div>
+              <span class="badge badge-${t.priority.toLowerCase()}">${escapeHTML(t.priority)}</span>
             </div>
-            <span class="badge ${e.status === 'Completed' ? 'badge-success' : 'badge-warning'}">
-              ${escapeHTML(e.status)}
-            </span>
-          </div>
-        `).join('');
+          `).join('');
+
+          tasksChecklist.querySelectorAll('[data-toggle-task]').forEach(cb => {
+            cb.addEventListener('change', e => {
+              const tId = e.target.getAttribute('data-toggle-task');
+              State.toggleTaskStatus(tId);
+            });
+          });
+        }
       }
 
-      // Fixed Commitments Today
-      const commitmentsListEl = document.getElementById('dash-commitments-list');
-      const todayCommitments = SchedulerEngine.getCommitmentsForDate(todayStr, State.data.commitments);
-      document.getElementById('dash-commitments-count-badge').textContent = `${todayCommitments.length} blocks`;
+      // Today's Fixed Commitments
+      const commitmentsList = document.getElementById('today-commitments-list');
+      const commsCounter = document.getElementById('today-commitments-counter');
+      const todayComms = SchedulerEngine.getCommitmentsForDate(todayStr, State.data.commitments);
+      if (commsCounter) commsCounter.textContent = todayComms.length;
 
-      if (todayCommitments.length === 0) {
-        commitmentsListEl.innerHTML = `
-          <div class="empty-state" style="padding: 1rem;">
-            <div class="empty-state-text">No fixed commitments for today. Free schedule!</div>
-          </div>
-        `;
-      } else {
-        commitmentsListEl.innerHTML = todayCommitments.map(c => `
-          <div class="compact-item">
-            <div class="compact-item-left">
-              <span class="badge badge-info">${escapeHTML(c.startTime)} - ${escapeHTML(c.endTime)}</span>
-              <div>
-                <div class="compact-item-title">${escapeHTML(c.title)}</div>
-                <div class="compact-item-sub">${escapeHTML(c.category.toUpperCase())} ${c.notes ? '· ' + escapeHTML(c.notes) : ''}</div>
+      if (commitmentsList) {
+        if (todayComms.length === 0) {
+          commitmentsList.innerHTML = `<div class="empty-state"><p class="text-subtle text-sm">No fixed commitments today.</p></div>`;
+        } else {
+          commitmentsList.innerHTML = todayComms.map(c => `
+            <div class="commitment-item-row">
+              <div class="item-left">
+                <span class="item-time">${escapeHTML(c.startTime)} - ${escapeHTML(c.endTime)}</span>
+                <span class="item-title">${escapeHTML(c.title)}</span>
               </div>
+              <span class="badge">${escapeHTML(c.category.toUpperCase())}</span>
             </div>
-          </div>
-        `).join('');
+          `).join('');
+        }
       }
-
-      // Bind delegate checkboxes in dashboard
-      planTimelineEl.querySelectorAll('[data-toggle-block]').forEach(cb => {
-        cb.addEventListener('change', (e) => {
-          const blockId = e.target.getAttribute('data-toggle-block');
-          State.toggleBlockCompleted(todayStr, blockId);
-        });
-      });
-
-      urgentDueListEl.querySelectorAll('[data-toggle-task]').forEach(cb => {
-        cb.addEventListener('change', (e) => {
-          const taskId = e.target.getAttribute('data-toggle-task');
-          State.toggleTaskStatus(taskId);
-        });
-      });
     },
 
     // =======================================================================
-    // DAILY PLANNER RENDERING
+    // 2. TASKS DATABASE VIEW (Notion Style)
     // =======================================================================
 
-    renderPlanner() {
-      const dateStr = State.selectedPlannerDate;
-      const dateInput = document.getElementById('plan-date-input');
-      if (dateInput) dateInput.value = dateStr;
+    renderTasksTable() {
+      const rowsContainer = document.getElementById('tasks-database-rows');
+      if (!rowsContainer) return;
 
-      const dateDisplay = document.getElementById('timeline-date-display');
-      if (dateDisplay) {
-        dateDisplay.textContent = formatDateDisplay(dateStr);
-      }
-
-      const plan = State.data.plans[dateStr];
-      const timelineListEl = document.getElementById('planner-timeline-list');
-      const warningBox = document.getElementById('unscheduled-warning-box');
-      const unscheduledListEl = document.getElementById('unscheduled-tasks-list');
-
-      // Update Planner Stat Bar
-      const totalTimeEl = document.getElementById('plan-stat-total-time');
-      const studyTimeEl = document.getElementById('plan-stat-study-time');
-      const fixedTimeEl = document.getElementById('plan-stat-fixed-time');
-      const breaksTimeEl = document.getElementById('plan-stat-breaks-time');
-      const statusEl = document.getElementById('plan-stat-status');
-
-      if (!plan || !Array.isArray(plan.blocks) || plan.blocks.length === 0) {
-        totalTimeEl.textContent = '0h 0m';
-        studyTimeEl.textContent = '0h 0m';
-        fixedTimeEl.textContent = '0h 0m';
-        breaksTimeEl.textContent = '0h 0m';
-        statusEl.textContent = 'No Plan';
-        warningBox.style.display = 'none';
-
-        timelineListEl.innerHTML = `
-          <div class="empty-state">
-            <div class="empty-state-icon">📅</div>
-            <div class="empty-state-title">No daily schedule generated for ${formatDateDisplay(dateStr)}</div>
-            <p class="empty-state-text">Click "Generate / Regenerate Plan" to build a realistic timeline based on your available study time, lessons, and sleep hours.</p>
-            <button type="button" class="btn btn-primary btn-sm" id="planner-generate-cta">Generate Plan for ${formatDateDisplay(dateStr)}</button>
-          </div>
-        `;
-
-        document.getElementById('planner-generate-cta')?.addEventListener('click', () => {
-          this.openPlanGenerator(dateStr);
-        });
-        return;
-      }
-
-      // Calculate totals
-      const studyMins = plan.blocks.filter(b => b.type === 'study').reduce((a, b) => a + b.durationMinutes, 0);
-      const fixedMins = plan.blocks.filter(b => b.type === 'fixed').reduce((a, b) => a + b.durationMinutes, 0);
-      const breakMins = plan.blocks.filter(b => b.type === 'break' || b.type === 'buffer').reduce((a, b) => a + b.durationMinutes, 0);
-      const totalMins = studyMins + fixedMins + breakMins;
-
-      totalTimeEl.textContent = minutesToHourString(totalMins);
-      studyTimeEl.textContent = minutesToHourString(studyMins);
-      fixedTimeEl.textContent = minutesToHourString(fixedMins);
-      breaksTimeEl.textContent = minutesToHourString(breakMins);
-      statusEl.textContent = 'Active & Saved';
-
-      // Unscheduled warning
-      if (plan.unscheduledTasks && plan.unscheduledTasks.length > 0) {
-        warningBox.style.display = 'block';
-        unscheduledListEl.innerHTML = plan.unscheduledTasks.map(u => `
-          <li>
-            <strong>${escapeHTML(u.title)}</strong> (${escapeHTML(u.subject)} · ${u.durationMinutes} mins · ${escapeHTML(u.priority)} priority)
-            <br><small class="text-muted">${escapeHTML(u.reason || 'Could not fit before sleep.')}</small>
-          </li>
-        `).join('');
-      } else {
-        warningBox.style.display = 'none';
-      }
-
-      // Render timeline blocks
-      timelineListEl.innerHTML = plan.blocks.map((b, idx) => `
-        <div class="timeline-block block-${b.type} ${b.completed ? 'block-done' : ''}" data-block-id="${escapeHTML(b.id)}">
-          <div class="block-left">
-            <div class="block-time">
-              <span>${escapeHTML(b.startTime)}</span>
-              <span class="block-duration">${escapeHTML(b.endTime)} (${b.durationMinutes}m)</span>
-            </div>
-
-            <div class="block-details">
-              <div class="block-title-row">
-                <span class="block-title">${escapeHTML(b.title)}</span>
-                <span class="block-type-badge">${escapeHTML(b.type.toUpperCase())}</span>
-                ${b.subject ? `<span class="badge badge-primary">${escapeHTML(b.subject)}</span>` : ''}
-              </div>
-            </div>
-          </div>
-
-          <div class="block-right">
-            ${b.type === 'study' ? `
-              <label class="btn btn-ghost btn-xs" title="Toggle completed">
-                <input type="checkbox" class="task-checkbox-custom"
-                       ${b.completed ? 'checked' : ''}
-                       data-action="toggle-complete"
-                       data-block-id="${escapeHTML(b.id)}">
-              </label>
-            ` : ''}
-
-            <button type="button" class="btn btn-ghost btn-xs" title="Move Up" data-action="move-up" data-block-id="${escapeHTML(b.id)}" ${idx === 0 ? 'disabled' : ''}>
-              ▲
-            </button>
-            <button type="button" class="btn btn-ghost btn-xs" title="Move Down" data-action="move-down" data-block-id="${escapeHTML(b.id)}" ${idx === plan.blocks.length - 1 ? 'disabled' : ''}>
-              ▼
-            </button>
-            <button type="button" class="btn btn-ghost btn-xs" title="Edit block details" data-action="edit-block" data-block-id="${escapeHTML(b.id)}">
-              ✏️
-            </button>
-            <button type="button" class="btn btn-ghost btn-xs text-danger" title="Remove block" data-action="remove-block" data-block-id="${escapeHTML(b.id)}">
-              ✕
-            </button>
-          </div>
-        </div>
-      `).join('');
-
-      // Bind block interactive buttons
-      timelineListEl.querySelectorAll('[data-action]').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-          const action = e.currentTarget.getAttribute('data-action');
-          const blockId = e.currentTarget.getAttribute('data-block-id');
-
-          if (action === 'move-up') State.moveBlock(dateStr, blockId, 'up');
-          if (action === 'move-down') State.moveBlock(dateStr, blockId, 'down');
-          if (action === 'remove-block') State.removeBlock(dateStr, blockId);
-          if (action === 'edit-block') this.openEditBlockModal(dateStr, blockId);
-        });
-      });
-
-      timelineListEl.querySelectorAll('[data-action="toggle-complete"]').forEach(cb => {
-        cb.addEventListener('change', (e) => {
-          const blockId = e.currentTarget.getAttribute('data-block-id');
-          State.toggleBlockCompleted(dateStr, blockId);
-        });
-      });
-    },
-
-    // =======================================================================
-    // TASK MANAGEMENT RENDERING
-    // =======================================================================
-
-    renderTasks() {
-      const container = document.getElementById('tasks-list-container');
-      const counterEl = document.getElementById('filtered-task-counter');
       const todayStr = getTodayDateString();
+      let list = [...State.data.tasks];
+      const filters = State.taskFilters;
 
-      let filtered = [...State.data.tasks];
-
-      // Search
-      if (State.taskFilters.search) {
-        const q = State.taskFilters.search;
-        filtered = filtered.filter(t =>
+      // Filter: Search
+      if (filters.search) {
+        const q = filters.search;
+        list = list.filter(t =>
           t.title.toLowerCase().includes(q) ||
           t.subject.toLowerCase().includes(q) ||
           (t.notes && t.notes.toLowerCase().includes(q))
         );
       }
 
-      // Status
-      if (State.taskFilters.status === 'pending') {
-        filtered = filtered.filter(t => t.status !== 'Completed');
-      } else if (State.taskFilters.status === 'completed') {
-        filtered = filtered.filter(t => t.status === 'Completed');
-      } else if (State.taskFilters.status === 'due-today') {
-        filtered = filtered.filter(t => t.dueDate === todayStr && t.status !== 'Completed');
-      } else if (State.taskFilters.status === 'overdue') {
-        filtered = filtered.filter(t => t.dueDate < todayStr && t.status !== 'Completed');
+      // Filter: Status pill
+      if (filters.status === 'active') {
+        list = list.filter(t => t.status !== 'Completed');
+      } else if (filters.status === 'completed') {
+        list = list.filter(t => t.status === 'Completed');
+      } else if (filters.status === 'due-today') {
+        list = list.filter(t => t.dueDate === todayStr && t.status !== 'Completed');
+      } else if (filters.status === 'overdue') {
+        list = list.filter(t => t.dueDate < todayStr && t.status !== 'Completed');
       }
 
-      // Subject
-      if (State.taskFilters.subject !== 'all') {
-        filtered = filtered.filter(t => t.subject === State.taskFilters.subject);
+      // Filter: Subject
+      if (filters.subject !== 'all') {
+        list = list.filter(t => t.subject === filters.subject);
       }
 
-      // Type
-      if (State.taskFilters.type !== 'all') {
-        filtered = filtered.filter(t => t.type === State.taskFilters.type);
-      }
-
-      // Priority
-      if (State.taskFilters.priority !== 'all') {
-        filtered = filtered.filter(t => t.priority === State.taskFilters.priority);
+      // Filter: Priority
+      if (filters.priority !== 'all') {
+        list = list.filter(t => t.priority === filters.priority);
       }
 
       // Sort
-      const pMap = { Urgent: 4, High: 3, Medium: 2, Low: 1 };
-      filtered.sort((a, b) => {
-        if (State.taskFilters.sort === 'dueDate-asc') {
-          return a.dueDate.localeCompare(b.dueDate);
-        }
-        if (State.taskFilters.sort === 'priority-desc') {
-          return (pMap[b.priority] || 2) - (pMap[a.priority] || 2);
-        }
-        if (State.taskFilters.sort === 'duration-desc') {
-          return (b.durationMinutes || 0) - (a.durationMinutes || 0);
-        }
-        if (State.taskFilters.sort === 'duration-asc') {
-          return (a.durationMinutes || 0) - (b.durationMinutes || 0);
-        }
-        if (State.taskFilters.sort === 'createdAt-desc') {
-          return (b.createdAt || '').localeCompare(a.createdAt || '');
-        }
+      const pScore = { Urgent: 4, High: 3, Medium: 2, Low: 1 };
+      list.sort((a, b) => {
+        if (filters.sort === 'dueDate-asc') return (a.dueDate || '').localeCompare(b.dueDate || '');
+        if (filters.sort === 'priority-desc') return (pScore[b.priority] || 2) - (pScore[a.priority] || 2);
+        if (filters.sort === 'duration-asc') return (a.durationMinutes || 0) - (b.durationMinutes || 0);
+        if (filters.sort === 'duration-desc') return (b.durationMinutes || 0) - (a.durationMinutes || 0);
+        if (filters.sort === 'createdAt-desc') return (b.createdAt || '').localeCompare(a.createdAt || '');
         return 0;
       });
 
-      counterEl.textContent = `Showing ${filtered.length} of ${State.data.tasks.length} tasks`;
-
-      if (filtered.length === 0) {
-        container.innerHTML = `
-          <div class="empty-state" style="grid-column: 1 / -1;">
-            <div class="empty-state-icon">📋</div>
+      if (list.length === 0) {
+        rowsContainer.innerHTML = `
+          <div class="empty-state">
             <div class="empty-state-title">No tasks found</div>
-            <p class="empty-state-text">No tasks match your current filter criteria or search query.</p>
-            <button type="button" class="btn btn-secondary btn-sm" id="btn-empty-reset-filters">Reset Filters</button>
+            <p class="empty-state-text">No tasks match your current filter.</p>
           </div>
         `;
-        document.getElementById('btn-empty-reset-filters')?.addEventListener('click', () => {
-          this.resetTaskFilters();
-        });
         return;
       }
 
-      container.innerHTML = filtered.map(t => {
+      rowsContainer.innerHTML = list.map(t => {
         const isOverdue = t.dueDate < todayStr && t.status !== 'Completed';
-        const isDueToday = t.dueDate === todayStr;
+        const isToday = t.dueDate === todayStr;
 
         return `
-          <div class="task-card ${t.status === 'Completed' ? 'task-completed' : ''}" data-task-id="${escapeHTML(t.id)}">
-            <div class="task-card-header">
-              <div class="task-card-meta">
-                <span class="badge badge-primary">${escapeHTML(t.subject)}</span>
-                <span class="badge">${escapeHTML(t.type)}</span>
-                <span class="badge priority-${t.priority.toLowerCase()}">${escapeHTML(t.priority)}</span>
-              </div>
-              <span class="badge">⏱️ ${t.durationMinutes}m</span>
-            </div>
+          <div class="task-db-row ${t.status === 'Completed' ? 'completed' : ''}">
+            <input type="checkbox" class="check-toggle col-check"
+                   ${t.status === 'Completed' ? 'checked' : ''}
+                   data-action="toggle"
+                   data-task-id="${escapeHTML(t.id)}">
 
-            <div class="task-card-title-row">
-              <input type="checkbox" class="task-checkbox-custom"
-                     ${t.status === 'Completed' ? 'checked' : ''}
-                     data-action="toggle-task"
-                     data-task-id="${escapeHTML(t.id)}"
-                     title="Toggle completed">
-              <span class="task-card-title">${escapeHTML(t.title)}</span>
-            </div>
+            <span class="col-title" title="${escapeHTML(t.title)}">${escapeHTML(t.title)}</span>
 
-            ${t.notes ? `<div class="task-card-notes">${escapeHTML(t.notes)}</div>` : ''}
+            <span class="col-subject">
+              <span class="badge badge-subject">${escapeHTML(t.subject)}</span>
+            </span>
 
-            <div class="task-card-footer">
-              <div class="task-due-info">
-                <span>📅 Due: <strong>${formatDateDisplay(t.dueDate)}</strong> ${t.dueTime ? escapeHTML(t.dueTime) : ''}</span>
-                ${isOverdue ? '<span class="badge badge-danger">OVERDUE</span>' : ''}
-                ${isDueToday ? '<span class="badge badge-warning">TODAY</span>' : ''}
-              </div>
+            <span class="col-due">
+              <span class="badge ${isOverdue ? 'badge-urgent' : (isToday ? 'badge-high' : '')}">
+                ${formatDateDisplay(t.dueDate)}
+              </span>
+            </span>
 
-              <div class="task-actions-btn-group">
-                <button type="button" class="btn btn-ghost btn-xs" data-action="edit-task" data-task-id="${escapeHTML(t.id)}" title="Edit task">
-                  ✏️ Edit
-                </button>
-                <button type="button" class="btn btn-ghost btn-xs text-danger" data-action="delete-task" data-task-id="${escapeHTML(t.id)}" title="Delete task">
-                  🗑️
-                </button>
-              </div>
+            <span class="col-priority">
+              <span class="badge badge-${t.priority.toLowerCase()}">${escapeHTML(t.priority)}</span>
+            </span>
+
+            <span class="col-duration text-subtle text-sm">${t.durationMinutes}m</span>
+
+            <div class="col-actions">
+              <button type="button" class="btn btn-ghost btn-xs" data-action="edit" data-task-id="${escapeHTML(t.id)}">✏</button>
+              <button type="button" class="btn btn-ghost btn-xs text-danger" data-action="delete" data-task-id="${escapeHTML(t.id)}">✕</button>
             </div>
           </div>
         `;
       }).join('');
 
-      // Bind task interactive events
-      container.querySelectorAll('[data-action="toggle-task"]').forEach(cb => {
-        cb.addEventListener('change', (e) => {
-          const taskId = e.currentTarget.getAttribute('data-task-id');
-          State.toggleTaskStatus(taskId);
+      rowsContainer.querySelectorAll('[data-action="toggle"]').forEach(cb => {
+        cb.addEventListener('change', e => {
+          const id = e.target.getAttribute('data-task-id');
+          State.toggleTaskStatus(id);
         });
       });
 
-      container.querySelectorAll('[data-action="edit-task"]').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-          const taskId = e.currentTarget.getAttribute('data-task-id');
-          this.openTaskModal(taskId);
+      rowsContainer.querySelectorAll('[data-action="edit"]').forEach(btn => {
+        btn.addEventListener('click', e => {
+          const id = e.currentTarget.getAttribute('data-task-id');
+          this.openTaskModal(id);
         });
       });
 
-      container.querySelectorAll('[data-action="delete-task"]').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-          const taskId = e.currentTarget.getAttribute('data-task-id');
-          State.deleteTask(taskId);
+      rowsContainer.querySelectorAll('[data-action="delete"]').forEach(btn => {
+        btn.addEventListener('click', e => {
+          const id = e.currentTarget.getAttribute('data-task-id');
+          State.deleteTask(id);
         });
       });
     },
 
-    resetTaskFilters() {
-      State.taskFilters = {
-        search: '',
-        status: 'pending',
-        subject: 'all',
-        type: 'all',
-        priority: 'all',
-        sort: 'dueDate-asc'
-      };
-      document.getElementById('task-search-input').value = '';
-      document.getElementById('filter-status').value = 'pending';
-      document.getElementById('filter-subject').value = 'all';
-      document.getElementById('filter-type').value = 'all';
-      document.getElementById('filter-priority').value = 'all';
-      document.getElementById('filter-sort').value = 'dueDate-asc';
-      this.renderTasks();
-    },
-
     // =======================================================================
-    // COMMITMENTS RENDERING
+    // 3. CALENDAR & AGENDA VIEW
     // =======================================================================
 
-    renderCommitments() {
-      const container = document.getElementById('commitments-list-container');
-      const counterEl = document.getElementById('commitments-count-badge');
-      const dayFilter = State.commitmentFilterDay;
+    renderCalendar() {
+      const selectedDate = State.selectedCalendarDate || getTodayDateString();
+      const datePicker = document.getElementById('calendar-date-picker');
+      if (datePicker) datePicker.value = selectedDate;
 
-      let list = [...State.data.commitments];
+      const label = document.getElementById('cal-selected-day-label');
+      if (label) label.textContent = formatDateDisplay(selectedDate);
 
-      if (dayFilter !== 'all') {
-        const dayNum = Number(dayFilter);
-        list = list.filter(c => {
-          if (c.recurrence === 'recurring') {
-            return Array.isArray(c.daysOfWeek) && c.daysOfWeek.includes(dayNum);
-          }
-          if (c.recurrence === 'one-time' && c.date) {
-            const d = parseDateString(c.date);
-            return d.getDay() === dayNum;
-          }
-          return false;
-        });
+      // Selected Day Agenda: Study blocks + Fixed Commitments
+      const agendaList = document.getElementById('cal-day-agenda-list');
+      const plan = State.data.plans[selectedDate];
+      const comms = SchedulerEngine.getCommitmentsForDate(selectedDate, State.data.commitments);
+
+      if (agendaList) {
+        let combined = [];
+
+        if (plan && Array.isArray(plan.blocks)) {
+          combined = [...plan.blocks];
+        } else {
+          // If no plan, show fixed commitments
+          comms.forEach(c => {
+            combined.push({
+              id: 'c_' + c.id,
+              title: c.title,
+              type: 'fixed',
+              startTime: c.startTime,
+              endTime: c.endTime,
+              durationMinutes: timeStringToMinutes(c.endTime) - timeStringToMinutes(c.startTime)
+            });
+          });
+        }
+
+        if (combined.length === 0) {
+          agendaList.innerHTML = `
+            <div class="empty-state">
+              <div class="empty-state-title">No events for this date</div>
+              <p class="empty-state-text">Press "Plan This Day" to schedule your tasks around fixed commitments.</p>
+            </div>
+          `;
+        } else {
+          agendaList.innerHTML = combined.map(b => `
+            <div class="timeline-item">
+              <div class="item-left">
+                <span class="item-time">${escapeHTML(b.startTime)} - ${escapeHTML(b.endTime)}</span>
+                <span class="item-title">${escapeHTML(b.title)}</span>
+                ${b.subject ? `<span class="badge badge-subject">${escapeHTML(b.subject)}</span>` : ''}
+              </div>
+              <span class="badge">${escapeHTML((b.type || 'fixed').toUpperCase())}</span>
+            </div>
+          `).join('');
+        }
       }
 
-      counterEl.textContent = `${list.length} configured`;
-
-      if (list.length === 0) {
-        container.innerHTML = `
-          <div class="empty-state">
-            <div class="empty-state-icon">🕒</div>
-            <div class="empty-state-title">No commitments found</div>
-            <p class="empty-state-text">Add your school hours, Arabic/History lessons, SAT classes, and sleep schedule.</p>
-          </div>
-        `;
-        return;
-      }
+      // Commitments Library List
+      const commsList = document.getElementById('cal-commitments-library');
+      const totalCounter = document.getElementById('cal-commitments-total');
+      const allComms = State.data.commitments;
+      if (totalCounter) totalCounter.textContent = allComms.length;
 
       const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-      container.innerHTML = list.map(c => {
-        const recurrenceText = c.recurrence === 'recurring'
-          ? (Array.isArray(c.daysOfWeek) ? c.daysOfWeek.map(d => dayNames[d]).join(', ') : 'Weekly')
-          : `Date: ${formatDateDisplay(c.date)}`;
+      if (commsList) {
+        if (allComms.length === 0) {
+          commsList.innerHTML = `<div class="empty-state"><p class="text-subtle text-sm">No commitments configured.</p></div>`;
+        } else {
+          commsList.innerHTML = allComms.map(c => {
+            const recurStr = c.recurrence === 'recurring'
+              ? (Array.isArray(c.daysOfWeek) ? c.daysOfWeek.map(d => dayNames[d]).join(', ') : 'Weekly')
+              : `Date: ${formatDateDisplay(c.date)}`;
 
-        return `
-          <div class="commitment-item" data-commitment-id="${escapeHTML(c.id)}">
-            <div class="compact-item-left">
-              <span class="badge badge-info">${escapeHTML(c.startTime)} - ${escapeHTML(c.endTime)}</span>
-              <div>
-                <div class="compact-item-title">${escapeHTML(c.title)}</div>
-                <div class="compact-item-sub">
-                  ${escapeHTML(c.category.toUpperCase())} · ${escapeHTML(recurrenceText)}
-                  ${c.notes ? '· ' + escapeHTML(c.notes) : ''}
+            return `
+              <div class="commitment-item-row">
+                <div class="item-left">
+                  <span class="item-time">${escapeHTML(c.startTime)} - ${escapeHTML(c.endTime)}</span>
+                  <div>
+                    <div class="item-title">${escapeHTML(c.title)}</div>
+                    <div class="text-sm text-subtle">${escapeHTML(recurStr)} · ${escapeHTML(c.category)}</div>
+                  </div>
+                </div>
+                <div class="item-right">
+                  <button type="button" class="btn btn-ghost btn-xs" data-edit-comm="${escapeHTML(c.id)}">✏</button>
+                  <button type="button" class="btn btn-ghost btn-xs text-danger" data-delete-comm="${escapeHTML(c.id)}">✕</button>
                 </div>
               </div>
-            </div>
+            `;
+          }).join('');
 
-            <div class="task-actions-btn-group">
-              <button type="button" class="btn btn-ghost btn-xs" data-action="edit-comm" data-comm-id="${escapeHTML(c.id)}">
-                ✏️ Edit
-              </button>
-              <button type="button" class="btn btn-ghost btn-xs text-danger" data-action="delete-comm" data-comm-id="${escapeHTML(c.id)}">
-                🗑️
-              </button>
-            </div>
-          </div>
-        `;
-      }).join('');
+          commsList.querySelectorAll('[data-edit-comm]').forEach(btn => {
+            btn.addEventListener('click', e => {
+              const id = e.currentTarget.getAttribute('data-edit-comm');
+              this.openCommitmentModal(id);
+            });
+          });
 
-      container.querySelectorAll('[data-action="edit-comm"]').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-          const id = e.currentTarget.getAttribute('data-comm-id');
-          this.openCommitmentModal(id);
-        });
-      });
-
-      container.querySelectorAll('[data-action="delete-comm"]').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-          const id = e.currentTarget.getAttribute('data-comm-id');
-          State.deleteCommitment(id);
-        });
-      });
+          commsList.querySelectorAll('[data-delete-comm]').forEach(btn => {
+            btn.addEventListener('click', e => {
+              const id = e.currentTarget.getAttribute('data-delete-comm');
+              State.deleteCommitment(id);
+            });
+          });
+        }
+      }
     },
 
     // =======================================================================
-    // SETTINGS RENDERING
+    // 4. SETTINGS VIEW
     // =======================================================================
 
     renderSettings() {
-      const s = State.data.settings || DEFAULT_SETTINGS;
-      document.getElementById('pref-sleep-start').value = s.sleepStart || '23:00';
-      document.getElementById('pref-sleep-end').value = s.sleepEnd || '06:30';
-      document.getElementById('pref-buffer-mins').value = s.bufferMinutes || 30;
-      document.getElementById('pref-break-mins').value = s.breakDurationMinutes || 10;
-      document.getElementById('pref-max-block').value = s.maxBlockDurationMinutes || 50;
+      const s = State.data.settings;
+      const sleepStart = document.getElementById('set-sleep-start');
+      const sleepEnd = document.getElementById('set-sleep-end');
+      const bufMins = document.getElementById('set-buffer-mins');
+      const breakMins = document.getElementById('set-break-mins');
 
-      this.updateStorageMeta(State.data);
-    },
+      if (sleepStart) sleepStart.value = s.sleepStart || '23:00';
+      if (sleepEnd) sleepEnd.value = s.sleepEnd || '06:30';
+      if (bufMins) bufMins.value = s.bufferMinutes || 30;
+      if (breakMins) breakMins.value = s.breakDurationMinutes || 10;
 
-    updateStorageMeta(data) {
-      const tasksEl = document.getElementById('storage-tasks-count');
-      const commsEl = document.getElementById('storage-commitments-count');
-      const plansEl = document.getElementById('storage-plans-count');
-      const savedEl = document.getElementById('storage-last-saved');
-
-      if (tasksEl) tasksEl.textContent = data.tasks.length;
-      if (commsEl) commsEl.textContent = data.commitments.length;
-      if (plansEl) plansEl.textContent = Object.keys(data.plans || {}).length;
-      if (savedEl) savedEl.textContent = data.lastSavedAt ? new Date(data.lastSavedAt).toLocaleTimeString() : 'Never';
-    },
-
-    savePreferences() {
-      const s = {
-        sleepStart: document.getElementById('pref-sleep-start').value,
-        sleepEnd: document.getElementById('pref-sleep-end').value,
-        bufferMinutes: Number(document.getElementById('pref-buffer-mins').value),
-        breakDurationMinutes: Number(document.getElementById('pref-break-mins').value),
-        maxBlockDurationMinutes: Number(document.getElementById('pref-max-block').value),
-        studyStartTime: State.data.settings.studyStartTime || '15:30'
-      };
-
-      State.data.settings = s;
-      State.save(true);
-      this.toast('Scheduling preferences updated.', 'success');
+      CloudSync.updateStatusBadge();
     },
 
     // =======================================================================
-    // MODAL DIALOGS & HANDLERS
+    // MODAL DIALOGS
     // =======================================================================
 
-    openModal(modalId) {
-      const el = document.getElementById(modalId);
-      if (el) {
-        el.classList.add('active');
-        el.setAttribute('aria-hidden', 'false');
-      }
+    openModal(id) {
+      const el = document.getElementById(id);
+      if (el) el.classList.add('active');
     },
 
-    closeModal(modalId) {
-      const el = document.getElementById(modalId);
-      if (el) {
-        el.classList.remove('active');
-        el.setAttribute('aria-hidden', 'true');
-      }
+    closeModal(id) {
+      const el = document.getElementById(id);
+      if (el) el.classList.remove('active');
     },
 
-    // Task Modal
+    // Task Modal: Clean, initially showing essential fields
     openTaskModal(taskId = null) {
-      const titleEl = document.getElementById('modal-task-title');
+      const modalTitle = document.getElementById('modal-task-title');
       const idInput = document.getElementById('task-id');
       const titleInput = document.getElementById('task-title');
-      const subjectSelect = document.getElementById('task-subject');
-      const typeSelect = document.getElementById('task-type');
-      const durationInput = document.getElementById('task-duration');
-      const prioritySelect = document.getElementById('task-priority');
-      const dueDateInput = document.getElementById('task-due-date');
+      const subjectInput = document.getElementById('task-subject');
+      const dueInput = document.getElementById('task-due-date');
+      const durInput = document.getElementById('task-duration');
+      const priorityInput = document.getElementById('task-priority');
+
+      const moreContent = document.getElementById('content-task-more');
+      const moreLabel = document.getElementById('label-task-more');
+      if (moreContent) moreContent.style.display = 'none';
+      if (moreLabel) moreLabel.textContent = '▸ More options (type, study date, notes)';
+
+      const typeInput = document.getElementById('task-type');
       const dueTimeInput = document.getElementById('task-due-time');
       const prefDateInput = document.getElementById('task-preferred-date');
-      const statusSelect = document.getElementById('task-status');
+      const statusInput = document.getElementById('task-status');
       const notesInput = document.getElementById('task-notes');
 
       if (taskId) {
         const task = State.data.tasks.find(t => t.id === taskId);
         if (!task) return;
-        titleEl.textContent = 'Edit Task';
-        idInput.value = task.id;
-        titleInput.value = task.title;
-        subjectSelect.value = task.subject;
-        typeSelect.value = task.type;
-        durationInput.value = task.durationMinutes;
-        prioritySelect.value = task.priority;
-        dueDateInput.value = task.dueDate;
-        dueTimeInput.value = task.dueTime || '';
-        prefDateInput.value = task.preferredStudyDate || '';
-        statusSelect.value = task.status;
-        notesInput.value = task.notes || '';
+        if (modalTitle) modalTitle.textContent = 'Edit Task';
+        if (idInput) idInput.value = task.id;
+        if (titleInput) titleInput.value = task.title;
+        if (subjectInput) subjectInput.value = task.subject;
+        if (dueInput) dueInput.value = task.dueDate;
+        if (durInput) durInput.value = task.durationMinutes;
+        if (priorityInput) priorityInput.value = task.priority;
+
+        if (typeInput) typeInput.value = task.type || 'Homework';
+        if (dueTimeInput) dueTimeInput.value = task.dueTime || '';
+        if (prefDateInput) prefDateInput.value = task.preferredStudyDate || '';
+        if (statusInput) statusInput.value = task.status || 'Pending';
+        if (notesInput) notesInput.value = task.notes || '';
       } else {
-        titleEl.textContent = 'Add New Task';
-        idInput.value = '';
-        titleInput.value = '';
-        subjectSelect.value = 'Math';
-        typeSelect.value = 'Homework';
-        durationInput.value = 45;
-        prioritySelect.value = 'Medium';
-        dueDateInput.value = getTodayDateString();
-        dueTimeInput.value = '';
-        prefDateInput.value = getTodayDateString();
-        statusSelect.value = 'Pending';
-        notesInput.value = '';
+        if (modalTitle) modalTitle.textContent = 'New Task';
+        if (idInput) idInput.value = '';
+        if (titleInput) titleInput.value = '';
+        if (subjectInput) subjectInput.value = 'Math';
+        if (dueInput) dueInput.value = getTodayDateString();
+        if (durInput) durInput.value = 45;
+        if (priorityInput) priorityInput.value = 'Medium';
+
+        if (typeInput) typeInput.value = 'Homework';
+        if (dueTimeInput) dueTimeInput.value = '';
+        if (prefDateInput) prefDateInput.value = getTodayDateString();
+        if (statusInput) statusInput.value = 'Pending';
+        if (notesInput) notesInput.value = '';
       }
 
       this.openModal('modal-task');
-      titleInput.focus();
+      if (titleInput) titleInput.focus();
     },
 
     saveTaskFromModal() {
       const id = document.getElementById('task-id').value;
       const title = document.getElementById('task-title').value.trim();
       const subject = document.getElementById('task-subject').value;
-      const type = document.getElementById('task-type').value;
-      const duration = Number(document.getElementById('task-duration').value) || 45;
-      const priority = document.getElementById('task-priority').value;
       const dueDate = document.getElementById('task-due-date').value;
-      const dueTime = document.getElementById('task-due-time').value || null;
-      const prefDate = document.getElementById('task-preferred-date').value || null;
-      const status = document.getElementById('task-status').value;
-      const notes = document.getElementById('task-notes').value.trim();
+      const durationMinutes = Number(document.getElementById('task-duration').value) || 45;
+      const priority = document.getElementById('task-priority').value;
+
+      const type = document.getElementById('task-type')?.value || 'Homework';
+      const dueTime = document.getElementById('task-due-time')?.value || null;
+      const preferredStudyDate = document.getElementById('task-preferred-date')?.value || null;
+      const status = document.getElementById('task-status')?.value || 'Pending';
+      const notes = document.getElementById('task-notes')?.value.trim() || '';
 
       if (!title || !dueDate) {
-        this.toast('Please provide a task title and due date.', 'warning');
+        this.toast('Title and due date are required.', 'warning');
         return;
       }
 
       if (id) {
         State.updateTask(id, {
-          title, subject, type, durationMinutes: duration, priority, dueDate,
-          dueTime, preferredStudyDate: prefDate, status, notes
+          title, subject, dueDate, durationMinutes, priority, type, dueTime, preferredStudyDate, status, notes
         });
-        this.toast('Task updated.', 'success');
       } else {
         const newTask = {
           id: 'task_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
-          title, subject, type, durationMinutes: duration, priority, dueDate,
-          dueTime, preferredStudyDate: prefDate, status, notes,
+          title, subject, dueDate, durationMinutes, priority, type, dueTime, preferredStudyDate, status, notes,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
           completedAt: status === 'Completed' ? new Date().toISOString() : null
         };
         State.addTask(newTask);
-        this.toast('Task added.', 'success');
       }
 
       this.closeModal('modal-task');
@@ -1900,31 +1749,28 @@
 
     // Commitment Modal
     openCommitmentModal(commId = null) {
-      const titleEl = document.getElementById('modal-commitment-title');
       const idInput = document.getElementById('commitment-id');
       const titleInput = document.getElementById('commitment-title');
-      const catSelect = document.getElementById('commitment-category');
-      const recSelect = document.getElementById('commitment-recurrence');
+      const catInput = document.getElementById('commitment-category');
+      const recInput = document.getElementById('commitment-recurrence');
       const dateInput = document.getElementById('commitment-date');
       const startInput = document.getElementById('commitment-start');
       const endInput = document.getElementById('commitment-end');
       const notesInput = document.getElementById('commitment-notes');
 
-      // Uncheck all days
       document.querySelectorAll('input[name="comm-day"]').forEach(c => c.checked = false);
 
       if (commId) {
         const comm = State.data.commitments.find(c => c.id === commId);
         if (!comm) return;
-        titleEl.textContent = 'Edit Fixed Commitment';
-        idInput.value = comm.id;
-        titleInput.value = comm.title;
-        catSelect.value = comm.category || 'lesson';
-        recSelect.value = comm.recurrence || 'recurring';
-        dateInput.value = comm.date || '';
-        startInput.value = comm.startTime;
-        endInput.value = comm.endTime;
-        notesInput.value = comm.notes || '';
+        if (idInput) idInput.value = comm.id;
+        if (titleInput) titleInput.value = comm.title;
+        if (catInput) catInput.value = comm.category;
+        if (recInput) recInput.value = comm.recurrence;
+        if (dateInput) dateInput.value = comm.date || '';
+        if (startInput) startInput.value = comm.startTime;
+        if (endInput) endInput.value = comm.endTime;
+        if (notesInput) notesInput.value = comm.notes || '';
 
         if (comm.recurrence === 'recurring' && Array.isArray(comm.daysOfWeek)) {
           comm.daysOfWeek.forEach(day => {
@@ -1933,28 +1779,26 @@
           });
         }
       } else {
-        titleEl.textContent = 'Add Fixed Commitment';
-        idInput.value = '';
-        titleInput.value = '';
-        catSelect.value = 'lesson';
-        recSelect.value = 'recurring';
-        dateInput.value = getTodayDateString();
-        startInput.value = '16:00';
-        endInput.value = '17:30';
-        notesInput.value = '';
-        // Check weekdays by default
-        [0, 1, 2, 3, 4].forEach(day => {
-          const cb = document.querySelector(`input[name="comm-day"][value="${day}"]`);
+        if (idInput) idInput.value = '';
+        if (titleInput) titleInput.value = '';
+        if (catInput) catInput.value = 'lesson';
+        if (recInput) recInput.value = 'recurring';
+        if (dateInput) dateInput.value = getTodayDateString();
+        if (startInput) startInput.value = '16:00';
+        if (endInput) endInput.value = '17:30';
+        if (notesInput) notesInput.value = '';
+        [0, 1, 2, 3, 4].forEach(d => {
+          const cb = document.querySelector(`input[name="comm-day"][value="${d}"]`);
           if (cb) cb.checked = true;
         });
       }
 
-      const isRecurring = recSelect.value === 'recurring';
-      document.getElementById('group-commitment-days').style.display = isRecurring ? 'block' : 'none';
-      document.getElementById('group-commitment-date').style.display = isRecurring ? 'none' : 'block';
+      const isRec = (recInput ? recInput.value : 'recurring') === 'recurring';
+      document.getElementById('group-commitment-days').style.display = isRec ? 'block' : 'none';
+      document.getElementById('group-commitment-date').style.display = isRec ? 'none' : 'block';
 
       this.openModal('modal-commitment');
-      titleInput.focus();
+      if (titleInput) titleInput.focus();
     },
 
     saveCommitmentFromModal() {
@@ -1968,184 +1812,133 @@
       const notes = document.getElementById('commitment-notes').value.trim();
 
       if (!title || !startTime || !endTime) {
-        this.toast('Please fill out the title, start time, and end time.', 'warning');
-        return;
-      }
-
-      if (timeStringToMinutes(endTime) <= timeStringToMinutes(startTime)) {
-        this.toast('End time must be later than start time.', 'warning');
+        this.toast('Please provide title and hours.', 'warning');
         return;
       }
 
       let daysOfWeek = [];
       if (recurrence === 'recurring') {
-        document.querySelectorAll('input[name="comm-day"]:checked').forEach(cb => {
-          daysOfWeek.push(Number(cb.value));
-        });
-        if (daysOfWeek.length === 0) {
-          this.toast('Please select at least one day of the week.', 'warning');
+        document.querySelectorAll('input[name="comm-day"]:checked').forEach(c => daysOfWeek.push(Number(c.value)));
+        if (!daysOfWeek.length) {
+          this.toast('Select at least one day.', 'warning');
           return;
         }
-      } else if (!date) {
-        this.toast('Please specify a date for this one-time commitment.', 'warning');
-        return;
       }
 
       if (id) {
-        State.updateCommitment(id, {
-          title, category, recurrence, daysOfWeek, date, startTime, endTime, notes
-        });
-        this.toast('Commitment updated.', 'success');
+        State.updateCommitment(id, { title, category, recurrence, daysOfWeek, date, startTime, endTime, notes });
       } else {
-        const newComm = {
+        State.addCommitment({
           id: 'comm_' + Date.now(),
           title, category, recurrence, daysOfWeek, date, startTime, endTime, notes
-        };
-        State.addCommitment(newComm);
-        this.toast('Commitment added.', 'success');
+        });
       }
 
       this.closeModal('modal-commitment');
     },
 
-    // Plan Generator Modal
-    openPlanGenerator(targetDateStr) {
-      document.getElementById('gen-plan-date').value = targetDateStr || getTodayDateString();
-      document.getElementById('gen-start-time').value = State.data.settings.studyStartTime || '15:30';
-      document.getElementById('gen-buffer-mins').value = State.data.settings.bufferMinutes || 30;
-      document.getElementById('gen-break-mins').value = State.data.settings.breakDurationMinutes || 10;
-      document.getElementById('gen-max-session').value = State.data.settings.maxBlockDurationMinutes || 50;
+    // Plan My Day Workflow
+    openPlanGenerator(dateStr) {
+      const genDate = document.getElementById('gen-plan-date');
+      const genStart = document.getElementById('gen-start-time');
+      if (genDate) genDate.value = dateStr || getTodayDateString();
+      if (genStart) genStart.value = State.data.settings.studyStartTime || '15:30';
 
-      // Populate Checklist with active tasks
-      const checklistEl = document.getElementById('generator-task-checklist');
+      const checklist = document.getElementById('gen-tasks-checklist');
       const activeTasks = State.data.tasks.filter(t => t.status !== 'Completed');
 
-      if (activeTasks.length === 0) {
-        checklistEl.innerHTML = `
-          <div style="padding: 0.5rem; color: var(--text-muted); font-size: 0.85rem;">
-            No pending tasks. You can add tasks before planning or schedule breaks/commitments.
-          </div>
-        `;
-      } else {
-        checklistEl.innerHTML = activeTasks.map(t => {
-          const isDueOrOverdue = t.dueDate <= targetDateStr;
-          return `
-            <label class="generator-task-item">
-              <input type="checkbox" value="${escapeHTML(t.id)}"
-                     data-due="${escapeHTML(t.dueDate)}"
-                     ${isDueOrOverdue ? 'checked' : 'checked'}>
-              <span style="font-weight: 500;">${escapeHTML(t.title)}</span>
-              <span class="badge badge-primary">${escapeHTML(t.subject)}</span>
-              <span class="badge priority-${t.priority.toLowerCase()}">${escapeHTML(t.priority)}</span>
-              <span style="margin-left:auto; font-size:0.75rem; color:var(--text-muted);">${t.durationMinutes}m</span>
+      if (checklist) {
+        if (!activeTasks.length) {
+          checklist.innerHTML = `<div class="text-sm text-subtle p-2">No pending tasks. Add a task first.</div>`;
+        } else {
+          checklist.innerHTML = activeTasks.map(t => `
+            <label class="gen-task-item">
+              <input type="checkbox" value="${escapeHTML(t.id)}" checked>
+              <span class="font-500">${escapeHTML(t.title)}</span>
+              <span class="badge badge-subject">${escapeHTML(t.subject)}</span>
+              <span class="text-sm text-subtle" style="margin-left:auto;">${t.durationMinutes}m</span>
             </label>
-          `;
-        }).join('');
+          `).join('');
+        }
       }
 
-      // Hide preview section initially
-      document.getElementById('generator-preview-section').style.display = 'none';
-      document.getElementById('btn-apply-plan').disabled = true;
-      State.tempProposedPlan = null;
+      const previewSection = document.getElementById('gen-preview-section');
+      if (previewSection) previewSection.style.display = 'none';
+      const btnApply = document.getElementById('btn-apply-plan');
+      if (btnApply) btnApply.disabled = true;
 
+      State.tempProposedPlan = null;
       this.openModal('modal-plan-generator');
     },
 
-    calculateAndPreviewProposal() {
+    calculatePlanPreview() {
       const dateStr = document.getElementById('gen-plan-date').value;
       const startTimeStr = document.getElementById('gen-start-time').value;
-      const bufferMins = Number(document.getElementById('gen-buffer-mins').value);
-      const breakMins = Number(document.getElementById('gen-break-mins').value);
-      const maxBlockMins = Number(document.getElementById('gen-max-session').value);
 
-      // Selected tasks
-      const checkedTaskIds = Array.from(document.querySelectorAll('#generator-task-checklist input:checked')).map(c => c.value);
-      const tasksToSchedule = State.data.tasks.filter(t => checkedTaskIds.includes(t.id) && t.status !== 'Completed');
-
-      const customSettings = {
-        ...State.data.settings,
-        bufferMinutes: bufferMins,
-        breakDurationMinutes: breakMins,
-        maxBlockDurationMinutes: maxBlockMins,
-        studyStartTime: startTimeStr
-      };
+      const checkedIds = Array.from(document.querySelectorAll('#gen-tasks-checklist input:checked')).map(c => c.value);
+      const tasksToSchedule = State.data.tasks.filter(t => checkedIds.includes(t.id) && t.status !== 'Completed');
 
       const proposal = SchedulerEngine.generatePlan({
         dateStr,
         startTimeStr,
         tasksToSchedule,
         commitments: State.data.commitments,
-        settings: customSettings
+        settings: State.data.settings
       });
 
       State.tempProposedPlan = proposal;
 
-      // Show preview
-      const previewSection = document.getElementById('generator-preview-section');
-      const previewList = document.getElementById('generator-preview-list');
-      const statBadge = document.getElementById('preview-stat-badge');
+      const previewSection = document.getElementById('gen-preview-section');
+      const previewList = document.getElementById('gen-preview-list');
+      const previewBadge = document.getElementById('gen-preview-badge');
+      const btnApply = document.getElementById('btn-apply-plan');
 
-      previewSection.style.display = 'block';
-      statBadge.textContent = `${proposal.totalStudyMins}m Study · ${proposal.blocks.length} Blocks`;
+      if (previewSection) previewSection.style.display = 'block';
+      if (previewBadge) previewBadge.textContent = `${proposal.blocks.length} blocks suggested`;
 
-      if (proposal.blocks.length === 0) {
-        previewList.innerHTML = `<p class="text-muted" style="padding:0.5rem;">No blocks could be scheduled. Check start time and sleep schedule.</p>`;
-      } else {
-        previewList.innerHTML = proposal.blocks.map(b => `
-          <div class="compact-item">
-            <div class="compact-item-left">
-              <span class="badge ${b.type === 'study' ? 'badge-primary' : (b.type === 'break' ? 'badge-success' : 'badge-info')}">
-                ${escapeHTML(b.startTime)} - ${escapeHTML(b.endTime)}
-              </span>
-              <div>
-                <div class="compact-item-title">${escapeHTML(b.title)}</div>
-                <div class="compact-item-sub">${b.durationMinutes} mins · ${escapeHTML(b.type.toUpperCase())}</div>
-              </div>
+      if (previewList) {
+        if (!proposal.blocks.length) {
+          previewList.innerHTML = `<p class="text-subtle text-sm">No blocks could fit. Check start time and sleep schedule.</p>`;
+        } else {
+          previewList.innerHTML = proposal.blocks.map(b => `
+            <div class="timeline-item">
+              <span class="item-time">${escapeHTML(b.startTime)} - ${escapeHTML(b.endTime)}</span>
+              <span class="item-title">${escapeHTML(b.title)}</span>
+              <span class="badge">${escapeHTML(b.type)}</span>
             </div>
-          </div>
-        `).join('');
+          `).join('');
 
-        if (proposal.unscheduledTasks.length > 0) {
-          previewList.innerHTML += `
-            <div class="callout callout-warning" style="margin-top:0.6rem; padding:0.6rem 0.8rem;">
-              <strong>${proposal.unscheduledTasks.length} task(s) could not fit:</strong>
-              <div style="font-size:0.8rem; margin-top:0.25rem;">
-                ${proposal.unscheduledTasks.map(u => escapeHTML(u.title)).join(', ')}
+          if (proposal.unscheduledTasks.length > 0) {
+            previewList.innerHTML += `
+              <div class="migration-alert mt-2">
+                <strong>Notice: ${proposal.unscheduledTasks.length} task(s) could not fit before bedtime:</strong>
+                <div>${proposal.unscheduledTasks.map(u => escapeHTML(u.title)).join(', ')}</div>
               </div>
-            </div>
-          `;
+            `;
+          }
         }
       }
 
-      document.getElementById('btn-apply-plan').disabled = false;
-      this.toast('Proposed schedule calculated. Review below and click "Apply Plan".', 'info');
+      if (btnApply) btnApply.disabled = false;
     },
 
-    applyProposedPlan() {
-      if (!State.tempProposedPlan) {
-        this.toast('Please calculate a proposed plan first.', 'warning');
-        return;
-      }
-
+    applyPlan() {
+      if (!State.tempProposedPlan) return;
       const dateStr = State.tempProposedPlan.date;
       State.saveDailyPlan(dateStr, State.tempProposedPlan);
-
       this.closeModal('modal-plan-generator');
-      State.selectedPlannerDate = dateStr;
-      this.switchTab('planner');
-      this.toast(`Plan for ${formatDateDisplay(dateStr)} saved and applied.`, 'success');
+      this.renderAll();
     },
 
-    // Trigger Reschedule Action
     triggerReschedule(dateStr) {
       const currentPlan = State.data.plans[dateStr];
       if (!currentPlan) {
-        this.toast('No existing plan for this date to reschedule. Use "Generate Plan" instead.', 'warning');
+        this.toast('No active plan to reschedule. Use "Plan My Day".', 'warning');
         return;
       }
 
-      this.confirm(`Reschedule remaining tasks for today starting from now? Completed sessions will be preserved.`, () => {
-        const revisedPlan = SchedulerEngine.rescheduleRemaining({
+      this.confirm('Reschedule remaining study blocks from current time? Completed work is preserved.', () => {
+        const revised = SchedulerEngine.rescheduleRemaining({
           dateStr,
           currentPlan,
           allTasks: State.data.tasks,
@@ -2153,67 +1946,27 @@
           settings: State.data.settings
         });
 
-        State.saveDailyPlan(dateStr, revisedPlan);
+        State.saveDailyPlan(dateStr, revised);
         this.renderAll();
-
-        if (revisedPlan.unscheduledTasks.length > 0) {
-          this.toast(`Rescheduled. Note: ${revisedPlan.unscheduledTasks.length} tasks could not fit in the remaining time.`, 'warning', 6000);
-        } else {
-          this.toast('Schedule successfully adjusted around remaining hours!', 'success');
-        }
+        this.toast('Schedule adjusted around remaining hours.', 'success');
       });
     },
 
-    // Edit Block Modal
-    openEditBlockModal(dateStr, blockId) {
-      const plan = State.data.plans[dateStr];
-      if (!plan || !plan.blocks) return;
-      const block = plan.blocks.find(b => b.id === blockId);
-      if (!block) return;
-
-      document.getElementById('edit-block-id').value = block.id;
-      document.getElementById('edit-block-title').value = block.title;
-      document.getElementById('edit-block-start').value = block.startTime;
-      document.getElementById('edit-block-end').value = block.endTime;
-      document.getElementById('edit-block-type').value = block.type;
-
-      this.openModal('modal-edit-block');
-    },
-
-    saveEditedBlock() {
-      const dateStr = State.selectedPlannerDate;
-      const blockId = document.getElementById('edit-block-id').value;
-      const title = document.getElementById('edit-block-title').value.trim();
-      const start = document.getElementById('edit-block-start').value;
-      const end = document.getElementById('edit-block-end').value;
-      const type = document.getElementById('edit-block-type').value;
-
-      if (!title || !start || !end) {
-        this.toast('Please provide valid title and times.', 'warning');
-        return;
-      }
-
-      State.updateBlock(dateStr, blockId, title, start, end, type);
-      this.closeModal('modal-edit-block');
-      this.toast('Block updated.', 'success');
-    },
-
-    // Import Backup Handler
-    handleBackupImport(event) {
-      const file = event.target.files[0];
+    handleImportBackup(e) {
+      const file = e.target.files[0];
       if (!file) return;
 
       const reader = new FileReader();
-      reader.onload = (e) => {
+      reader.onload = evt => {
         try {
-          const parsed = JSON.parse(e.target.result);
+          const parsed = JSON.parse(evt.target.result);
           const validation = Storage.validateImport(parsed);
           if (!validation.valid) {
-            this.toast(`Import Failed: ${validation.message}`, 'danger', 6000);
+            this.toast('Invalid backup file: ' + validation.message, 'danger');
             return;
           }
 
-          this.confirm(`Importing this backup will replace current tasks and schedule. Do you wish to proceed?`, () => {
+          this.confirm(`Restore backup containing ${parsed.tasks.length} tasks? This replaces current local tasks.`, () => {
             State.data = {
               version: STORAGE_VERSION,
               tasks: parsed.tasks,
@@ -2223,26 +1976,23 @@
               lastSavedAt: new Date().toISOString()
             };
             State.save(true);
-            this.renderAll();
-            this.toast('Backup successfully imported!', 'success');
+            this.toast('Backup restored successfully.', 'success');
           });
         } catch (err) {
-          console.error('Backup JSON parse error:', err);
-          this.toast('Invalid JSON file format. Could not parse backup.', 'danger', 6000);
+          this.toast('Failed to parse JSON backup file.', 'danger');
         } finally {
-          event.target.value = '';
+          e.target.value = '';
         }
       };
       reader.readAsText(file);
     },
 
-    // Confirmation Modal System
-    confirm(message, onConfirm, onCancel = null) {
-      const msgEl = document.getElementById('modal-confirm-message');
+    confirm(message, onConfirm) {
+      const msg = document.getElementById('modal-confirm-message');
       const okBtn = document.getElementById('modal-confirm-ok');
       const cancelBtn = document.getElementById('modal-confirm-cancel');
 
-      msgEl.textContent = message;
+      if (msg) msg.textContent = message;
 
       const cleanup = () => {
         this.closeModal('modal-confirm');
@@ -2259,73 +2009,49 @@
 
       document.getElementById('modal-confirm-cancel').addEventListener('click', () => {
         cleanup();
-        if (typeof onCancel === 'function') onCancel();
       }, { once: true });
     },
 
-    // In-App Toast System
-    toast(message, type = 'info', duration = 3500) {
+    toast(message, type = 'info', duration = 3000) {
       const container = document.getElementById('toast-container');
       if (!container) return;
 
       const toast = document.createElement('div');
       toast.className = `toast toast-${type}`;
-
-      const iconMap = {
-        success: '✓',
-        danger: '⚠',
-        warning: '!',
-        info: 'ℹ'
-      };
-
       toast.innerHTML = `
-        <span class="toast-icon">${iconMap[type] || 'ℹ'}</span>
         <span class="toast-message">${escapeHTML(message)}</span>
-        <button type="button" class="toast-close" title="Dismiss">&times;</button>
+        <button type="button" class="toast-close">&times;</button>
       `;
 
-      toast.querySelector('.toast-close').addEventListener('click', () => {
-        toast.style.opacity = '0';
-        setTimeout(() => toast.remove(), 200);
-      });
-
+      toast.querySelector('.toast-close').addEventListener('click', () => toast.remove());
       container.appendChild(toast);
 
       setTimeout(() => {
-        if (toast.parentElement) {
-          toast.style.opacity = '0';
-          setTimeout(() => toast.remove(), 200);
-        }
+        if (toast.parentElement) toast.remove();
       }, duration);
     }
   };
 
   // =========================================================================
-  // HELPER FUNCTIONS (PURE UTILITIES)
+  // UTILITY FUNCTIONS
   // =========================================================================
 
   function getTodayDateString() {
     const d = new Date();
-    return formatDateKey(d);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   }
 
   function getRelativeDateString(daysOffset) {
     const d = new Date();
     d.setDate(d.getDate() + daysOffset);
-    return formatDateKey(d);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   }
 
   function offsetDateString(dateStr, offsetDays) {
-    const d = parseDateString(dateStr);
-    d.setDate(d.getDate() + offsetDays);
-    return formatDateKey(d);
-  }
-
-  function formatDateKey(dateObj) {
-    const year = dateObj.getFullYear();
-    const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-    const day = String(dateObj.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const dateObj = new Date(y, m - 1, d);
+    dateObj.setDate(dateObj.getDate() + offsetDays);
+    return `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
   }
 
   function parseDateString(dateStr) {
@@ -2335,21 +2061,13 @@
 
   function formatDateDisplay(dateStr) {
     if (!dateStr) return '';
-    const date = parseDateString(dateStr);
-    const todayStr = getTodayDateString();
+    const today = getTodayDateString();
+    if (dateStr === today) return 'Today';
+    if (dateStr === offsetDateString(today, 1)) return 'Tomorrow';
+    if (dateStr === offsetDateString(today, -1)) return 'Yesterday';
 
-    if (dateStr === todayStr) return 'Today';
-    if (dateStr === offsetDateString(todayStr, 1)) return 'Tomorrow';
-    if (dateStr === offsetDateString(todayStr, -1)) return 'Yesterday';
-
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', weekday: 'short' });
-  }
-
-  function daysDifference(dateStr1, dateStr2) {
-    const d1 = parseDateString(dateStr1);
-    const d2 = parseDateString(dateStr2);
-    const diffTime = d2.getTime() - d1.getTime();
-    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    const d = parseDateString(dateStr);
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', weekday: 'short' });
   }
 
   function timeStringToMinutes(timeStr) {
@@ -2364,12 +2082,6 @@
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
   }
 
-  function minutesToHourString(minutes) {
-    const h = Math.floor(minutes / 60);
-    const m = minutes % 60;
-    return `${h}h ${m}m`;
-  }
-
   function escapeHTML(str) {
     if (str === null || str === undefined) return '';
     return String(str)
@@ -2381,8 +2093,16 @@
   }
 
   // =========================================================================
-  // BOOTSTRAP APPLICATION
+  // EXPORTS & BOOTSTRAP
   // =========================================================================
+
+  window.StudyFlow = {
+    Storage,
+    CloudSync,
+    State,
+    SchedulerEngine,
+    UI
+  };
 
   document.addEventListener('DOMContentLoaded', () => {
     UI.init();
