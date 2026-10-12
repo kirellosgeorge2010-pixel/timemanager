@@ -1,0 +1,956 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="StudyFlow - Lightweight dynamic study planner for Grade 11 students with unpredictable workloads.">
+  <title>StudyFlow | Adaptive Study Planner for Grade 11</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="theme-dark">
+  <!-- Toast Notifications Container -->
+  <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+
+  <!-- Header -->
+  <header class="app-header">
+    <div class="header-left">
+      <div class="brand">
+        <div class="brand-logo" aria-hidden="true">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"></path>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <h1 class="brand-title">StudyFlow</h1>
+          <span class="brand-badge">Grade 11 Edition</span>
+        </div>
+      </div>
+      <div class="current-date-badge" id="current-date-badge">
+        <span class="date-icon" aria-hidden="true">📅</span>
+        <span id="header-date-text">Loading date...</span>
+      </div>
+    </div>
+
+    <!-- Quick action buttons in header -->
+    <div class="header-actions">
+      <button type="button" class="btn btn-secondary btn-sm" id="btn-quick-plan" title="Plan current day schedule">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+        <span>Plan My Day</span>
+      </button>
+      <button type="button" class="btn btn-primary btn-sm" id="btn-quick-add-task" title="Add a new task">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+        <span>Add Task</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Navigation Bar -->
+  <nav class="app-nav" aria-label="Main Navigation">
+    <div class="nav-container">
+      <button type="button" class="nav-btn active" data-tab="dashboard">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"></rect><rect x="14" y="3" width="7" height="5"></rect><rect x="14" y="12" width="7" height="9"></rect><rect x="3" y="16" width="7" height="5"></rect></svg>
+        <span>Dashboard</span>
+      </button>
+      <button type="button" class="nav-btn" data-tab="planner">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+        <span>Daily Plan</span>
+        <span class="nav-counter" id="nav-plan-status" style="display:none;">Active</span>
+      </button>
+      <button type="button" class="nav-btn" data-tab="tasks">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+        <span>Tasks</span>
+        <span class="nav-counter" id="nav-tasks-count">0</span>
+      </button>
+      <button type="button" class="nav-btn" data-tab="commitments">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+        <span>Fixed Commitments</span>
+      </button>
+      <button type="button" class="nav-btn" data-tab="settings">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+        <span>Backup &amp; Settings</span>
+      </button>
+    </div>
+  </nav>
+
+  <!-- Main Container -->
+  <main class="app-main">
+
+    <!-- TAB 1: DASHBOARD -->
+    <section id="view-dashboard" class="view-panel active">
+      <!-- Top banner / summary -->
+      <div class="dashboard-banner">
+        <div class="banner-content">
+          <h2 class="welcome-heading">Grade 11 Command Center</h2>
+          <p class="welcome-subtext">Manage school workload, SAT preparation, lessons, and exam deadlines dynamically.</p>
+        </div>
+        <div class="banner-cta">
+          <button type="button" class="btn btn-accent btn-lg" id="btn-banner-plan">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+            Plan My Day
+          </button>
+        </div>
+      </div>
+
+      <!-- Quick Metrics Cards -->
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="metric-icon metric-icon-pending">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 14 14"></polyline></svg>
+          </div>
+          <div class="metric-info">
+            <span class="metric-label">Pending Tasks</span>
+            <span class="metric-value" id="stat-pending-tasks">0</span>
+            <span class="metric-sub" id="stat-pending-duration">0 hrs estimated</span>
+          </div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-icon metric-icon-due">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+          </div>
+          <div class="metric-info">
+            <span class="metric-label">Due Today</span>
+            <span class="metric-value" id="stat-due-today">0</span>
+            <span class="metric-sub" id="stat-due-today-sub">0 completed</span>
+          </div>
+        </div>
+
+        <div class="metric-card" id="metric-card-overdue">
+          <div class="metric-icon metric-icon-overdue">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+          </div>
+          <div class="metric-info">
+            <span class="metric-label">Overdue Tasks</span>
+            <span class="metric-value" id="stat-overdue-tasks">0</span>
+            <span class="metric-sub text-danger" id="stat-overdue-sub">Needs attention</span>
+          </div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-icon metric-icon-progress">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+          </div>
+          <div class="metric-info">
+            <span class="metric-label">Study Completion</span>
+            <span class="metric-value" id="stat-completion-pct">0%</span>
+            <div class="metric-progress-bar">
+              <div class="metric-progress-fill" id="stat-progress-fill" style="width: 0%"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Dashboard Grid: 2 Columns on desktop -->
+      <div class="dashboard-grid">
+        <!-- Left: Today's Active Plan & Schedule -->
+        <div class="card dashboard-card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <h3 class="card-title">Today's Daily Plan</h3>
+              <span class="badge" id="dash-plan-status-badge">No Plan Generated</span>
+            </div>
+            <div class="card-actions">
+              <button type="button" class="btn btn-secondary btn-xs" id="dash-reschedule-btn" style="display:none;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
+                Reschedule Remaining
+              </button>
+              <button type="button" class="btn btn-primary btn-xs" id="dash-create-plan-btn">Plan Today</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div id="dash-plan-timeline" class="mini-timeline">
+              <!-- Dynamically populated or empty state -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: Tasks Due Today & Overdue -->
+        <div class="card dashboard-card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <h3 class="card-title">Urgent &amp; Due Today</h3>
+              <span class="badge badge-warning" id="dash-urgent-count-badge">0</span>
+            </div>
+            <button type="button" class="btn btn-secondary btn-xs" id="dash-view-all-tasks-btn">View All Tasks</button>
+          </div>
+          <div class="card-body">
+            <div id="dash-due-tasks-list" class="task-compact-list">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Left Bottom: Upcoming Exams & Deadlines -->
+        <div class="card dashboard-card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <h3 class="card-title">Upcoming Exams &amp; Key Deadlines</h3>
+              <span class="badge badge-info">Next 14 Days</span>
+            </div>
+          </div>
+          <div class="card-body">
+            <div id="dash-exams-list" class="exam-list">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Right Bottom: Today's Fixed Commitments -->
+        <div class="card dashboard-card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <h3 class="card-title">Today's Fixed Commitments</h3>
+              <span class="badge" id="dash-commitments-count-badge">0 blocks</span>
+            </div>
+            <button type="button" class="btn btn-secondary btn-xs" id="dash-manage-commitments-btn">Manage</button>
+          </div>
+          <div class="card-body">
+            <div id="dash-commitments-list" class="commitment-mini-list">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 2: DAILY PLANNER -->
+    <section id="view-planner" class="view-panel">
+      <div class="view-header">
+        <div class="view-title-group">
+          <h2 class="view-title">Dynamic Daily Schedule</h2>
+          <p class="view-subtitle">Realistic time-blocked plan tailored around your fixed lessons, breaks, and buffer time.</p>
+        </div>
+
+        <!-- Planner Date Controls -->
+        <div class="planner-controls">
+          <div class="date-picker-group">
+            <button type="button" class="btn btn-secondary btn-icon" id="plan-prev-day" title="Previous Day">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            </button>
+            <input type="date" id="plan-date-input" class="form-control date-input" aria-label="Planning Date">
+            <button type="button" class="btn btn-secondary btn-icon" id="plan-next-day" title="Next Day">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"></polyline></svg>
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm" id="plan-today-btn">Today</button>
+          </div>
+
+          <div class="planner-actions">
+            <button type="button" class="btn btn-primary btn-sm" id="btn-generate-plan">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+              <span>Generate / Regenerate Plan</span>
+            </button>
+            <button type="button" class="btn btn-warning btn-sm" id="btn-reschedule-remaining" title="Re-plan remaining tasks starting from current time without touching completed blocks">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
+              <span>Reschedule Remaining</span>
+            </button>
+            <button type="button" class="btn btn-danger-outline btn-sm" id="btn-clear-plan" title="Clear current day plan">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+              <span>Clear Plan</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Plan Summary Cards -->
+      <div class="planner-stats-bar" id="planner-stats-bar">
+        <div class="stat-pill">
+          <span class="pill-label">Total Time:</span>
+          <span class="pill-value" id="plan-stat-total-time">0h 0m</span>
+        </div>
+        <div class="stat-pill">
+          <span class="pill-label">Study Sessions:</span>
+          <span class="pill-value text-primary" id="plan-stat-study-time">0h 0m</span>
+        </div>
+        <div class="stat-pill">
+          <span class="pill-label">Fixed Commitments:</span>
+          <span class="pill-value text-secondary" id="plan-stat-fixed-time">0h 0m</span>
+        </div>
+        <div class="stat-pill">
+          <span class="pill-label">Breaks &amp; Buffer:</span>
+          <span class="pill-value text-accent" id="plan-stat-breaks-time">0h 0m</span>
+        </div>
+        <div class="stat-pill">
+          <span class="pill-label">Status:</span>
+          <span class="pill-value" id="plan-stat-status">Saved</span>
+        </div>
+      </div>
+
+      <!-- Unscheduled Tasks Warning Callout (if any task couldn't fit) -->
+      <div id="unscheduled-warning-box" class="callout callout-warning" style="display: none;">
+        <div class="callout-header">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"></polygon><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+          <strong id="unscheduled-title">Insufficient Available Time Notice</strong>
+        </div>
+        <div class="callout-body">
+          <p id="unscheduled-desc">The following tasks could not be scheduled today because available study time is exhausted before sleep hours:</p>
+          <ul id="unscheduled-tasks-list" class="unscheduled-list"></ul>
+          <p class="callout-tip">💡 <strong>Tip:</strong> StudyFlow never removes breaks or intrudes into sleep hours to overload you. We recommend prioritizing urgent items or shifting non-urgent tasks to tomorrow.</p>
+        </div>
+      </div>
+
+      <!-- Schedule Timeline Container -->
+      <div class="timeline-wrapper">
+        <div class="timeline-header-meta">
+          <span class="timeline-title">Schedule Blocks for <span id="timeline-date-display">Today</span></span>
+          <span class="timeline-legend">
+            <span class="legend-item"><span class="legend-color legend-study"></span> Study</span>
+            <span class="legend-item"><span class="legend-color legend-fixed"></span> Fixed Commitment</span>
+            <span class="legend-item"><span class="legend-color legend-break"></span> Break</span>
+            <span class="legend-item"><span class="legend-color legend-buffer"></span> Buffer</span>
+          </span>
+        </div>
+
+        <div id="planner-timeline-list" class="timeline-container">
+          <!-- Dynamic Blocks -->
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 3: TASKS MANAGEMENT -->
+    <section id="view-tasks" class="view-panel">
+      <div class="view-header">
+        <div class="view-title-group">
+          <h2 class="view-title">Task Management</h2>
+          <p class="view-subtitle">Add homework, SAT prep, quarter exams, and revision without disrupting existing plans.</p>
+        </div>
+        <button type="button" class="btn btn-primary" id="btn-add-task-main">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          <span>Add New Task</span>
+        </button>
+      </div>
+
+      <!-- Task Filters & Search Toolbar -->
+      <div class="filter-toolbar card">
+        <div class="filter-row">
+          <div class="search-box">
+            <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+            <input type="text" id="task-search-input" class="form-control" placeholder="Search tasks by title, subject, notes...">
+          </div>
+
+          <div class="filter-select-group">
+            <div class="select-wrapper">
+              <label for="filter-status" class="sr-only">Filter by Status</label>
+              <select id="filter-status" class="form-control">
+                <option value="all">Status: All</option>
+                <option value="pending" selected>Status: Active (Pending &amp; In Progress)</option>
+                <option value="completed">Status: Completed</option>
+                <option value="due-today">Status: Due Today</option>
+                <option value="overdue">Status: Overdue</option>
+              </select>
+            </div>
+
+            <div class="select-wrapper">
+              <label for="filter-subject" class="sr-only">Filter by Subject</label>
+              <select id="filter-subject" class="form-control">
+                <option value="all">Subject: All</option>
+                <option value="Math">Math</option>
+                <option value="English">English</option>
+                <option value="Arabic">Arabic</option>
+                <option value="History">History</option>
+                <option value="Physics">Physics</option>
+                <option value="Chemistry">Chemistry</option>
+                <option value="Biology">Biology</option>
+                <option value="SAT">SAT</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+
+            <div class="select-wrapper">
+              <label for="filter-type" class="sr-only">Filter by Type</label>
+              <select id="filter-type" class="form-control">
+                <option value="all">Type: All</option>
+                <option value="Homework">Homework</option>
+                <option value="SAT Math">SAT Math</option>
+                <option value="SAT English">SAT English</option>
+                <option value="Quarter Exam Preparation">Quarter Exam Prep</option>
+                <option value="GP Weekly Exam Preparation">GP Weekly Exam Prep</option>
+                <option value="Revision">Revision</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+
+            <div class="select-wrapper">
+              <label for="filter-priority" class="sr-only">Filter by Priority</label>
+              <select id="filter-priority" class="form-control">
+                <option value="all">Priority: All</option>
+                <option value="Urgent">Urgent</option>
+                <option value="High">High</option>
+                <option value="Medium">Medium</option>
+                <option value="Low">Low</option>
+              </select>
+            </div>
+
+            <div class="select-wrapper">
+              <label for="filter-sort" class="sr-only">Sort by</label>
+              <select id="filter-sort" class="form-control">
+                <option value="dueDate-asc">Sort: Due Date (Earliest first)</option>
+                <option value="priority-desc">Sort: Priority (Highest first)</option>
+                <option value="duration-desc">Sort: Duration (Longest first)</option>
+                <option value="duration-asc">Sort: Duration (Shortest first)</option>
+                <option value="createdAt-desc">Sort: Recently Added</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="filter-stats-strip">
+          <span id="filtered-task-counter">Showing 0 of 0 tasks</span>
+          <button type="button" class="btn btn-ghost btn-xs" id="btn-reset-filters">Reset Filters</button>
+        </div>
+      </div>
+
+      <!-- Task Cards Grid -->
+      <div id="tasks-list-container" class="task-grid">
+        <!-- Dynamically rendered tasks -->
+      </div>
+    </section>
+
+    <!-- TAB 4: FIXED COMMITMENTS & SCHEDULE -->
+    <section id="view-commitments" class="view-panel">
+      <div class="view-header">
+        <div class="view-title-group">
+          <h2 class="view-title">Fixed Commitments &amp; Availability</h2>
+          <p class="view-subtitle">Configure school hours, Arabic/History/Math lessons, SAT classes, meals, and sleep routines.</p>
+        </div>
+        <button type="button" class="btn btn-primary" id="btn-add-commitment-main">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          <span>Add Commitment</span>
+        </button>
+      </div>
+
+      <!-- Day preview tab selector -->
+      <div class="day-tabs-wrapper">
+        <span class="day-tabs-label">Filter Day:</span>
+        <div class="day-tabs" id="commitment-day-tabs">
+          <button type="button" class="day-tab-btn active" data-day="all">All</button>
+          <button type="button" class="day-tab-btn" data-day="0">Sun</button>
+          <button type="button" class="day-tab-btn" data-day="1">Mon</button>
+          <button type="button" class="day-tab-btn" data-day="2">Tue</button>
+          <button type="button" class="day-tab-btn" data-day="3">Wed</button>
+          <button type="button" class="day-tab-btn" data-day="4">Thu</button>
+          <button type="button" class="day-tab-btn" data-day="5">Fri</button>
+          <button type="button" class="day-tab-btn" data-day="6">Sat</button>
+        </div>
+      </div>
+
+      <div class="commitments-grid">
+        <!-- Commitments List -->
+        <div class="card commitments-card">
+          <div class="card-header">
+            <h3 class="card-title">Configured Blocks</h3>
+            <span class="badge" id="commitments-count-badge">0 configured</span>
+          </div>
+          <div class="card-body">
+            <div id="commitments-list-container" class="commitments-list">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Weekly routine guidance card -->
+        <div class="card commitments-card">
+          <div class="card-header">
+            <h3 class="card-title">Grade 11 Routine Advice</h3>
+          </div>
+          <div class="card-body">
+            <div class="guidance-content">
+              <div class="guidance-item">
+                <span class="guidance-icon">🏫</span>
+                <div>
+                  <strong>School Hours</strong>
+                  <p>Input your exact school schedule. StudyFlow automatically blocks these hours from study planning.</p>
+                </div>
+              </div>
+              <div class="guidance-item">
+                <span class="guidance-icon">📚</span>
+                <div>
+                  <strong>Subject Lessons</strong>
+                  <p>Add Arabic, History, English, Math, and SAT private or group lessons. You can mark them recurring on specific weekdays.</p>
+                </div>
+              </div>
+              <div class="guidance-item">
+                <span class="guidance-icon">🌙</span>
+                <div>
+                  <strong>Sleep &amp; Wake Times</strong>
+                  <p>Protecting sleep is non-negotiable. StudyFlow will never schedule study sessions during sleep hours.</p>
+                </div>
+              </div>
+              <div class="guidance-item">
+                <span class="guidance-icon">🛡️</span>
+                <div>
+                  <strong>Emergency Homework Buffer</strong>
+                  <p>Teachers often assign surprise homework. A 30–45 min buffer keeps your evening realistic.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 5: BACKUP & SETTINGS -->
+    <section id="view-settings" class="view-panel">
+      <div class="view-header">
+        <div class="view-title-group">
+          <h2 class="view-title">Data Storage, Backup &amp; Settings</h2>
+          <p class="view-subtitle">Manage browser data safety, export/import JSON backups, and customize scheduling buffers.</p>
+        </div>
+      </div>
+
+      <div class="settings-grid">
+        <!-- Card 1: Data Persistence Status & Safety -->
+        <div class="card settings-card">
+          <div class="card-header">
+            <h3 class="card-title">Browser Data Persistence</h3>
+            <span class="badge badge-success" id="storage-status-badge">Active &amp; Saved</span>
+          </div>
+          <div class="card-body">
+            <div class="storage-info-box">
+              <div class="storage-row">
+                <span class="storage-label">Storage Engine:</span>
+                <span class="storage-value font-mono">browser localStorage (v1)</span>
+              </div>
+              <div class="storage-row">
+                <span class="storage-label">Total Stored Tasks:</span>
+                <span class="storage-value" id="storage-tasks-count">0</span>
+              </div>
+              <div class="storage-row">
+                <span class="storage-label">Fixed Commitments:</span>
+                <span class="storage-value" id="storage-commitments-count">0</span>
+              </div>
+              <div class="storage-row">
+                <span class="storage-label">Saved Daily Plans:</span>
+                <span class="storage-value" id="storage-plans-count">0</span>
+              </div>
+              <div class="storage-row">
+                <span class="storage-label">Last Saved:</span>
+                <span class="storage-value font-mono" id="storage-last-saved">Never</span>
+              </div>
+            </div>
+
+            <div class="callout callout-info">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+              <div>
+                <strong>Important Storage Note:</strong>
+                <p>Data is stored locally in this browser. Clearing browser history/cache or using private incognito windows may erase saved data. We strongly advise exporting a JSON backup regularly.</p>
+              </div>
+            </div>
+
+            <div class="backup-actions">
+              <button type="button" class="btn btn-primary" id="btn-export-backup">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                <span>Export Backup (JSON)</span>
+              </button>
+
+              <label class="btn btn-secondary file-input-label" for="file-import-backup">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                <span>Import Backup (JSON)</span>
+                <input type="file" id="file-import-backup" accept=".json" class="sr-only">
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 2: Scheduling Preferences -->
+        <div class="card settings-card">
+          <div class="card-header">
+            <h3 class="card-title">Scheduling Engine Preferences</h3>
+          </div>
+          <div class="card-body">
+            <form id="settings-preferences-form" class="settings-form">
+              <div class="form-row form-row-2">
+                <div class="form-group">
+                  <label for="pref-sleep-start">Sleep Bedtime</label>
+                  <input type="time" id="pref-sleep-start" class="form-control" value="23:00" required>
+                  <small class="form-help">Study sessions will not be scheduled past this time.</small>
+                </div>
+                <div class="form-group">
+                  <label for="pref-sleep-end">Wake-up Time</label>
+                  <input type="time" id="pref-sleep-end" class="form-control" value="06:30" required>
+                  <small class="form-help">Earliest study start time for any day.</small>
+                </div>
+              </div>
+
+              <div class="form-row form-row-2">
+                <div class="form-group">
+                  <label for="pref-buffer-mins">Unexpected Homework Buffer (minutes)</label>
+                  <input type="number" id="pref-buffer-mins" class="form-control" min="0" max="120" step="5" value="30" required>
+                  <small class="form-help">Reserved time for surprise assignments or task overruns.</small>
+                </div>
+                <div class="form-group">
+                  <label for="pref-break-mins">Short Break Duration (minutes)</label>
+                  <input type="number" id="pref-break-mins" class="form-control" min="5" max="30" step="5" value="10" required>
+                  <small class="form-help">Automatically inserted between study blocks.</small>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label for="pref-max-block">Max Single Study Session (minutes)</label>
+                <input type="number" id="pref-max-block" class="form-control" min="20" max="120" step="5" value="50" required>
+                <small class="form-help">Recommended Pomodoro-style maximum before taking a rest break.</small>
+              </div>
+
+              <div class="form-actions">
+                <button type="submit" class="btn btn-primary btn-sm">Save Preferences</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <!-- Card 3: Danger Zone (Reset Data) -->
+        <div class="card settings-card danger-card">
+          <div class="card-header">
+            <h3 class="card-title text-danger">Reset &amp; Troubleshooting</h3>
+          </div>
+          <div class="card-body">
+            <p class="text-muted">Need to start fresh or reload default sample commitments? Be sure to export a backup first.</p>
+            <div class="danger-actions">
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-load-sample-data">
+                Load Grade 11 Starter Template
+              </button>
+              <button type="button" class="btn btn-danger-outline btn-sm" id="btn-reset-all-data">
+                Reset All Application Data
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ==================== MODALS ==================== -->
+
+  <!-- MODAL: ADD / EDIT TASK -->
+  <div id="modal-task" class="modal-backdrop" aria-hidden="true" role="dialog" aria-labelledby="modal-task-title">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3 id="modal-task-title" class="modal-title">Add New Task</h3>
+          <button type="button" class="modal-close" data-close-modal title="Close modal">&times;</button>
+        </div>
+        <form id="form-task">
+          <input type="hidden" id="task-id">
+          <div class="modal-body">
+            <div class="form-group">
+              <label for="task-title">Task Title <span class="text-danger">*</span></label>
+              <input type="text" id="task-title" class="form-control" placeholder="e.g. Chapter 4 Calculus Problems 1-25" required>
+            </div>
+
+            <div class="form-row form-row-2">
+              <div class="form-group">
+                <label for="task-subject">Subject <span class="text-danger">*</span></label>
+                <select id="task-subject" class="form-control" required>
+                  <option value="Math">Math</option>
+                  <option value="English">English</option>
+                  <option value="Arabic">Arabic</option>
+                  <option value="History">History</option>
+                  <option value="Physics">Physics</option>
+                  <option value="Chemistry">Chemistry</option>
+                  <option value="Biology">Biology</option>
+                  <option value="SAT">SAT</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label for="task-type">Task Type <span class="text-danger">*</span></label>
+                <select id="task-type" class="form-control" required>
+                  <option value="Homework">Homework</option>
+                  <option value="SAT Math">SAT Math</option>
+                  <option value="SAT English">SAT English</option>
+                  <option value="Quarter Exam Preparation">Quarter Exam Preparation</option>
+                  <option value="GP Weekly Exam Preparation">GP Weekly Exam Preparation</option>
+                  <option value="Revision">Revision</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-row form-row-2">
+              <div class="form-group">
+                <label for="task-duration">Estimated Duration (mins) <span class="text-danger">*</span></label>
+                <input type="number" id="task-duration" class="form-control" min="5" max="360" step="5" value="45" required>
+                <small class="form-help">How long you realistically need.</small>
+              </div>
+
+              <div class="form-group">
+                <label for="task-priority">Priority <span class="text-danger">*</span></label>
+                <select id="task-priority" class="form-control" required>
+                  <option value="Medium" selected>Medium</option>
+                  <option value="Low">Low</option>
+                  <option value="High">High</option>
+                  <option value="Urgent">Urgent (Due soon / Exam)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-row form-row-2">
+              <div class="form-group">
+                <label for="task-due-date">Due Date <span class="text-danger">*</span></label>
+                <input type="date" id="task-due-date" class="form-control" required>
+              </div>
+
+              <div class="form-group">
+                <label for="task-due-time">Due Time (Optional)</label>
+                <input type="time" id="task-due-time" class="form-control">
+              </div>
+            </div>
+
+            <div class="form-row form-row-2">
+              <div class="form-group">
+                <label for="task-preferred-date">Preferred Study Date (Optional)</label>
+                <input type="date" id="task-preferred-date" class="form-control">
+                <small class="form-help">Date you want StudyFlow to prioritize scheduling this.</small>
+              </div>
+
+              <div class="form-group">
+                <label for="task-status">Status</label>
+                <select id="task-status" class="form-control">
+                  <option value="Pending" selected>Pending</option>
+                  <option value="In Progress">In Progress</option>
+                  <option value="Completed">Completed</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="task-notes">Notes / Instructions (Optional)</label>
+              <textarea id="task-notes" class="form-control" rows="2" placeholder="Page numbers, textbook sections, link references..."></textarea>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-close-modal>Cancel</button>
+            <button type="submit" class="btn btn-primary" id="btn-save-task">Save Task</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: ADD / EDIT FIXED COMMITMENT -->
+  <div id="modal-commitment" class="modal-backdrop" aria-hidden="true" role="dialog" aria-labelledby="modal-commitment-title">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3 id="modal-commitment-title" class="modal-title">Add Fixed Commitment</h3>
+          <button type="button" class="modal-close" data-close-modal title="Close modal">&times;</button>
+        </div>
+        <form id="form-commitment">
+          <input type="hidden" id="commitment-id">
+          <div class="modal-body">
+            <div class="form-group">
+              <label for="commitment-title">Commitment Title <span class="text-danger">*</span></label>
+              <input type="text" id="commitment-title" class="form-control" placeholder="e.g. School Hours, Arabic Private Lesson, SAT Class" required>
+            </div>
+
+            <div class="form-row form-row-2">
+              <div class="form-group">
+                <label for="commitment-category">Category <span class="text-danger">*</span></label>
+                <select id="commitment-category" class="form-control" required>
+                  <option value="school">School Hours</option>
+                  <option value="lesson">Subject Lesson (Arabic/History/Math/English)</option>
+                  <option value="sat">SAT Lesson / Prep</option>
+                  <option value="exam">Exam / Test Session</option>
+                  <option value="sleep">Sleep Schedule</option>
+                  <option value="meal">Meal / Break Routine</option>
+                  <option value="personal">Personal / Family Commitment</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label for="commitment-recurrence">Recurrence <span class="text-danger">*</span></label>
+                <select id="commitment-recurrence" class="form-control" required>
+                  <option value="recurring">Recurring (Weekly on specific days)</option>
+                  <option value="one-time">One-time (Specific Date)</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Days of Week checkboxes (for recurring) -->
+            <div class="form-group" id="group-commitment-days">
+              <label class="form-label">Days of Week <span class="text-danger">*</span></label>
+              <div class="weekday-checkboxes">
+                <label class="checkbox-pill"><input type="checkbox" name="comm-day" value="0"> Sun</label>
+                <label class="checkbox-pill"><input type="checkbox" name="comm-day" value="1"> Mon</label>
+                <label class="checkbox-pill"><input type="checkbox" name="comm-day" value="2"> Tue</label>
+                <label class="checkbox-pill"><input type="checkbox" name="comm-day" value="3"> Wed</label>
+                <label class="checkbox-pill"><input type="checkbox" name="comm-day" value="4"> Thu</label>
+                <label class="checkbox-pill"><input type="checkbox" name="comm-day" value="5"> Fri</label>
+                <label class="checkbox-pill"><input type="checkbox" name="comm-day" value="6"> Sat</label>
+              </div>
+            </div>
+
+            <!-- Specific Date input (for one-time) -->
+            <div class="form-group" id="group-commitment-date" style="display:none;">
+              <label for="commitment-date">Date <span class="text-danger">*</span></label>
+              <input type="date" id="commitment-date" class="form-control">
+            </div>
+
+            <div class="form-row form-row-2">
+              <div class="form-group">
+                <label for="commitment-start">Start Time <span class="text-danger">*</span></label>
+                <input type="time" id="commitment-start" class="form-control" required>
+              </div>
+
+              <div class="form-group">
+                <label for="commitment-end">End Time <span class="text-danger">*</span></label>
+                <input type="time" id="commitment-end" class="form-control" required>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="commitment-notes">Notes (Optional)</label>
+              <input type="text" id="commitment-notes" class="form-control" placeholder="Location, tutor details, materials needed...">
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-close-modal>Cancel</button>
+            <button type="submit" class="btn btn-primary" id="btn-save-commitment">Save Commitment</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: PLAN GENERATION & CUSTOMIZATION DIALOG -->
+  <div id="modal-plan-generator" class="modal-backdrop" aria-hidden="true" role="dialog" aria-labelledby="modal-plan-title">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3 id="modal-plan-title" class="modal-title">Plan My Day</h3>
+          <button type="button" class="modal-close" data-close-modal title="Close modal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="generator-step-intro">
+            <p>Customize scheduling parameters for the selected day. StudyFlow evaluates your available hours around fixed commitments and sleep routines.</p>
+          </div>
+
+          <div class="form-row form-row-3">
+            <div class="form-group">
+              <label for="gen-plan-date">Target Date</label>
+              <input type="date" id="gen-plan-date" class="form-control" required>
+            </div>
+            <div class="form-group">
+              <label for="gen-start-time">Study Available From</label>
+              <input type="time" id="gen-start-time" class="form-control" value="15:30" required>
+              <small class="form-help">e.g. after school</small>
+            </div>
+            <div class="form-group">
+              <label for="gen-buffer-mins">Buffer for Surprise HW (mins)</label>
+              <input type="number" id="gen-buffer-mins" class="form-control" min="0" max="90" step="5" value="30">
+            </div>
+          </div>
+
+          <div class="form-row form-row-2">
+            <div class="form-group">
+              <label for="gen-break-mins">Break Between Blocks (mins)</label>
+              <input type="number" id="gen-break-mins" class="form-control" min="5" max="30" step="5" value="10">
+            </div>
+            <div class="form-group">
+              <label for="gen-max-session">Max Block Session (mins)</label>
+              <input type="number" id="gen-max-session" class="form-control" min="20" max="90" step="5" value="50">
+            </div>
+          </div>
+
+          <!-- Tasks to include checklist -->
+          <div class="generator-tasks-selection">
+            <div class="selection-header">
+              <label class="form-label">Select Tasks to Schedule:</label>
+              <div class="selection-actions">
+                <button type="button" class="btn btn-ghost btn-xs" id="btn-select-all-tasks">Select All</button>
+                <button type="button" class="btn btn-ghost btn-xs" id="btn-select-due-only">Due Today/Overdue Only</button>
+              </div>
+            </div>
+            <div id="generator-task-checklist" class="task-checklist-container">
+              <!-- Dynamically populated with active tasks -->
+            </div>
+          </div>
+
+          <!-- Proposed Plan Preview Stage (Appears after algorithm calculates) -->
+          <div id="generator-preview-section" class="generator-preview-section" style="display:none;">
+            <div class="preview-header">
+              <h4>Proposed Daily Schedule Preview</h4>
+              <span class="badge badge-accent" id="preview-stat-badge">Calculation Ready</span>
+            </div>
+            <p class="preview-note">Review your proposed blocks below. You can adjust blocks before applying.</p>
+            <div id="generator-preview-list" class="preview-blocks-list"></div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-close-modal>Cancel</button>
+          <button type="button" class="btn btn-secondary" id="btn-calculate-preview">Calculate Proposal</button>
+          <button type="button" class="btn btn-primary" id="btn-apply-plan" disabled>Apply Plan to Day</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: EDIT SCHEDULE BLOCK -->
+  <div id="modal-edit-block" class="modal-backdrop" aria-hidden="true" role="dialog" aria-labelledby="modal-block-title">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3 id="modal-block-title" class="modal-title">Edit Schedule Block</h3>
+          <button type="button" class="modal-close" data-close-modal title="Close modal">&times;</button>
+        </div>
+        <form id="form-edit-block">
+          <input type="hidden" id="edit-block-id">
+          <div class="modal-body">
+            <div class="form-group">
+              <label for="edit-block-title">Block Title</label>
+              <input type="text" id="edit-block-title" class="form-control" required>
+            </div>
+            <div class="form-row form-row-2">
+              <div class="form-group">
+                <label for="edit-block-start">Start Time</label>
+                <input type="time" id="edit-block-start" class="form-control" required>
+              </div>
+              <div class="form-group">
+                <label for="edit-block-end">End Time</label>
+                <input type="time" id="edit-block-end" class="form-control" required>
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="edit-block-type">Block Type</label>
+              <select id="edit-block-type" class="form-control">
+                <option value="study">Study Session</option>
+                <option value="break">Break</option>
+                <option value="buffer">Buffer / Flex</option>
+                <option value="fixed">Fixed Commitment</option>
+              </select>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-close-modal>Cancel</button>
+            <button type="submit" class="btn btn-primary">Save Block</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: CONFIRMATION DIALOG -->
+  <div id="modal-confirm" class="modal-backdrop" aria-hidden="true" role="dialog" aria-labelledby="modal-confirm-title">
+    <div class="modal-dialog modal-sm">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3 id="modal-confirm-title" class="modal-title">Confirm Action</h3>
+          <button type="button" class="modal-close" data-close-modal title="Close modal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p id="modal-confirm-message">Are you sure you want to proceed?</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="modal-confirm-cancel">Cancel</button>
+          <button type="button" class="btn btn-danger" id="modal-confirm-ok">Confirm</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
