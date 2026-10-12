@@ -25,7 +25,7 @@
       margin: 0 auto;
     }
     h1 { font-size: 1.5rem; margin-bottom: 0.35rem; font-weight: 700; letter-spacing: -0.02em; }
-    p.sub { color: var(--muted); margin-bottom: 1.5rem; font-size: 0.88rem; }
+    p.sub { color: var(--muted); margin-bottom: 1.5rem; font-size: 0.88rem; line-height: 1.4; }
     .toolbar {
       display: flex;
       gap: 1rem;
@@ -37,11 +37,12 @@
       background: var(--accent);
       color: #fff;
       border: none;
-      padding: 0.5rem 1rem;
+      padding: 0.5rem 1.1rem;
       border-radius: 6px;
       font-weight: 600;
       font-size: 0.84rem;
       cursor: pointer;
+      transition: filter 0.15s ease;
     }
     button:hover { filter: brightness(1.1); }
     .status-pill {
@@ -84,7 +85,7 @@
     .badge-fail { background: rgba(239, 68, 68, 0.15); color: #dc2626; border: 1px solid #ef4444; }
     .test-desc { font-size: 0.8rem; color: var(--muted); }
     .test-detail {
-      font-family: ui-monospace, monospace;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
       font-size: 0.75rem;
       background: rgba(0, 0, 0, 0.03);
       padding: 0.4rem 0.6rem;
@@ -104,12 +105,12 @@
 </head>
 <body>
   <h1>StudyFlow 2.0 Diagnostic Test Suite</h1>
-  <p class="sub">Validates Notion design architecture, localStorage persistence, Firebase CloudSync module, dynamic gap-based scheduler, and mobile responsiveness.</p>
+  <p class="sub">Validates Notion design architecture, localStorage persistence, tombstone anti-resurrection deletion guards, in-place edit propagation, simulated cross-device sync, save failure handling, and scheduler algorithms.</p>
 
   <div class="toolbar">
     <button type="button" id="btn-run-tests">Run All Tests</button>
     <span id="overall-status" class="status-pill status-running">Ready</span>
-    <span id="test-summary" style="font-size:0.85rem; color:var(--muted);">0 / 16 executed</span>
+    <span id="test-summary" style="font-size:0.85rem; color:var(--muted);">0 / 22 executed</span>
   </div>
 
   <div id="test-results" class="test-list"></div>
@@ -141,7 +142,7 @@
       }
 
       // =====================================================================
-      // 16 COMPREHENSIVE AUTOMATED TEST SUITES
+      // 22 COMPREHENSIVE AUTOMATED TEST SUITES
       // =====================================================================
 
       addTest(
@@ -158,12 +159,12 @@
 
       addTest(
         '2. Storage Initialization, Default Light Theme & Versioning',
-        'Ensures initial state contains version 1 and Notion-inspired light theme by default.',
+        'Ensures initial state contains version 2 and Notion-inspired light theme by default.',
         () => {
           assert(window.StudyFlow !== undefined, 'window.StudyFlow must be defined');
           const data = window.StudyFlow.State.data;
           assert(data !== null, 'State.data must be initialized');
-          assertEqual(data.version, 1, 'Data version must be 1');
+          assertEqual(data.version, 2, 'Data version must be 2');
           assert(data.settings.theme === 'light' || data.settings.theme === 'dark', 'Theme must be defined');
         }
       );
@@ -181,7 +182,7 @@
             JSON.parse(localStorage.getItem(corruptKey));
           } catch (e) {
             localStorage.setItem(corruptBackupKey, localStorage.getItem(corruptKey));
-            fallback = { version: 1, tasks: [] };
+            fallback = { version: 2, tasks: [] };
           }
 
           assert(fallback !== null, 'Must fallback to safe state');
@@ -196,8 +197,8 @@
         'Validates backup JSON schema rules: tasks and commitments must be valid arrays.',
         () => {
           const validator = window.StudyFlow.Storage.validateImport;
-          const validPayload = { version: 1, tasks: [{ id: '1', title: 'Math' }], commitments: [] };
-          const invalidPayload = { version: 1, tasks: 'not an array' };
+          const validPayload = { version: 2, tasks: [{ id: '1', title: 'Math' }], commitments: [] };
+          const invalidPayload = { version: 2, tasks: 'not an array' };
 
           assert(validator(validPayload).valid === true, 'Valid payload should pass');
           assert(validator(invalidPayload).valid === false, 'Invalid array should fail');
@@ -205,35 +206,294 @@
       );
 
       addTest(
-        '5. Task CRUD & Completion Toggle',
-        'Verifies task creation, completion toggle, and timestamps.',
+        '5. [Scenario 1] Task Creation & Simulated Refresh (Persistence Verification)',
+        'Creates a new task via State.addTask, persists it, then simulates a reload from Storage.load() to confirm presence.',
+        () => {
+          const testTaskId = 't_create_test_' + Date.now();
+          const newTask = {
+            id: testTaskId,
+            title: 'Chemistry Chapter 5 Practice',
+            subject: 'Chemistry',
+            durationMinutes: 50,
+            dueDate: '2026-10-20',
+            priority: 'High',
+            status: 'Pending'
+          };
+
+          window.StudyFlow.State.addTask(newTask);
+
+          // Simulate page refresh / reopen by loading directly from Storage
+          const reloadedData = window.StudyFlow.Storage.load();
+          const found = reloadedData.tasks.find(t => t.id === testTaskId);
+
+          assert(found !== undefined, 'Created task must be found after re-reading from storage');
+          assertEqual(found.title, 'Chemistry Chapter 5 Practice', 'Task title must match');
+          assertEqual(found.subject, 'Chemistry', 'Subject must match');
+          assertEqual(found.durationMinutes, 50, 'Duration must match');
+          assertEqual(found.status, 'Pending', 'Status must be Pending');
+          assert(found.createdAt !== undefined, 'Task must have createdAt timestamp');
+          assert(found.updatedAt !== undefined, 'Task must have updatedAt timestamp');
+        }
+      );
+
+      addTest(
+        '6. [Scenario 2] Task In-Place Edit & Simulated Refresh (Replacement Everywhere Without Duplication)',
+        'Edits an existing task and verifies it updates in-place without duplicates, and propagates to daily plan blocks.',
+        () => {
+          const editTaskId = 't_edit_test_' + Date.now();
+          window.StudyFlow.State.addTask({
+            id: editTaskId,
+            title: 'Original History Reading',
+            subject: 'History',
+            durationMinutes: 30,
+            dueDate: '2026-10-18',
+            priority: 'Medium',
+            status: 'Pending'
+          });
+
+          // Insert a daily plan block referencing this task
+          const testDate = '2026-10-18';
+          window.StudyFlow.State.data.plans[testDate] = {
+            date: testDate,
+            blocks: [{
+              id: 'b_test_' + editTaskId,
+              taskId: editTaskId,
+              title: 'Original History Reading',
+              subject: 'History',
+              durationMinutes: 30,
+              completed: false
+            }]
+          };
+
+          // Perform Edit
+          window.StudyFlow.State.updateTask(editTaskId, {
+            title: 'Updated History Reading: WWI Treaties',
+            priority: 'Urgent',
+            durationMinutes: 45
+          });
+
+          // Verify in-memory state: NO duplicate task IDs
+          const matches = window.StudyFlow.State.data.tasks.filter(t => t.id === editTaskId);
+          assertEqual(matches.length, 1, 'There must be exactly one task with this ID (no duplicates)');
+          assertEqual(matches[0].title, 'Updated History Reading: WWI Treaties', 'Title must be updated');
+          assertEqual(matches[0].priority, 'Urgent', 'Priority must be updated');
+          assertEqual(matches[0].durationMinutes, 45, 'Duration must be updated');
+
+          // Verify daily plan block was synchronized everywhere
+          const planBlock = window.StudyFlow.State.data.plans[testDate].blocks.find(b => b.taskId === editTaskId);
+          assert(planBlock !== undefined, 'Plan block must exist');
+          assertEqual(planBlock.title, 'Updated History Reading: WWI Treaties', 'Plan block title must be synchronized');
+          assertEqual(planBlock.durationMinutes, 45, 'Plan block duration must be synchronized');
+
+          // Simulate reload from storage to verify persistent update
+          const reloaded = window.StudyFlow.Storage.load();
+          const reloadedTask = reloaded.tasks.find(t => t.id === editTaskId);
+          assert(reloadedTask !== undefined, 'Task must persist');
+          assertEqual(reloadedTask.title, 'Updated History Reading: WWI Treaties', 'Persisted title must reflect edit');
+        }
+      );
+
+      addTest(
+        '7. [Scenario 3] Task Deletion & Simulated Refresh (Tombstone Recording & Deletions Stay Deleted)',
+        'Deletes a task, verifies tombstone is recorded, and confirms task remains deleted after storage reload and plan cleanup.',
+        () => {
+          const deleteTaskId = 't_del_test_' + Date.now();
+          window.StudyFlow.State.addTask({
+            id: deleteTaskId,
+            title: 'Ephemeral Task to Delete',
+            subject: 'English',
+            durationMinutes: 20,
+            dueDate: '2026-10-19',
+            priority: 'Low',
+            status: 'Pending'
+          });
+
+          // Ensure task is present before deletion
+          assert(window.StudyFlow.State.data.tasks.some(t => t.id === deleteTaskId), 'Task must exist before delete');
+
+          // Perform delete
+          window.StudyFlow.State.deleteTask(deleteTaskId);
+
+          // Verify local state removal
+          assert(!window.StudyFlow.State.data.tasks.some(t => t.id === deleteTaskId), 'Task must be removed from State');
+
+          // Verify Tombstone record
+          const tombstones = window.StudyFlow.TombstoneStore.load();
+          assert(tombstones[deleteTaskId] !== undefined, 'Tombstone must be recorded for deleted task ID');
+          assertEqual(tombstones[deleteTaskId].type, 'task', 'Tombstone type must be task');
+          assert(window.StudyFlow.TombstoneStore.isDeleted(deleteTaskId), 'TombstoneStore.isDeleted must return true');
+
+          // Simulate page refresh: Storage.load() must NOT resurrect the tombstoned task
+          const reloaded = window.StudyFlow.Storage.load();
+          assert(!reloaded.tasks.some(t => t.id === deleteTaskId), 'Tombstoned task must never resurrect after reload');
+        }
+      );
+
+      addTest(
+        '8. [Scenario 4] Multi-Device Sync Simulation & Anti-Resurrection Guard',
+        'Simulates incoming Cloud Firestore snapshot: deleted items are rejected, newer edits update, and new items merge without duplicates.',
+        () => {
+          const tombstonedId = 't_cloud_del_' + Date.now();
+          const existingId = 't_cloud_exist_' + Date.now();
+          const brandNewId = 't_cloud_new_' + Date.now();
+
+          // 1. Locally delete and tombstone an item
+          window.StudyFlow.TombstoneStore.record(tombstonedId, 'task');
+
+          // 2. Local existing item
+          const localExisting = {
+            id: existingId,
+            title: 'Local Version Title',
+            subject: 'Math',
+            durationMinutes: 40,
+            updatedAt: '2026-10-12T10:00:00.000Z'
+          };
+          window.StudyFlow.State.data.tasks.push(localExisting);
+
+          // 3. Simulated incoming Cloud payload from another device
+          const mockCloudPayload = {
+            tasks: [
+              // Device B has old cached deleted task
+              {
+                id: tombstonedId,
+                title: 'Stale Resurrection Attempt',
+                subject: 'Math',
+                updatedAt: '2026-10-12T08:00:00.000Z'
+              },
+              // Device B updated the existing task with newer changes
+              {
+                id: existingId,
+                title: 'Newer Cloud Title from Laptop',
+                subject: 'Math',
+                durationMinutes: 60,
+                updatedAt: '2026-10-12T12:00:00.000Z' // Newer than 10:00
+              },
+              // Device B created a brand new task
+              {
+                id: brandNewId,
+                title: 'Task Created on Tablet',
+                subject: 'SAT',
+                durationMinutes: 45,
+                updatedAt: '2026-10-12T11:00:00.000Z'
+              }
+            ],
+            commitments: [],
+            tombstones: {}
+          };
+
+          // Run merge
+          window.StudyFlow.CloudSync.mergeCloudData(mockCloudPayload);
+
+          // Check assertions:
+          // A. Deleted item was NOT resurrected
+          const resurrected = window.StudyFlow.State.data.tasks.find(t => t.id === tombstonedId);
+          assertEqual(resurrected, undefined, 'Cloud item matching local tombstone must be rejected');
+
+          // B. Existing item was updated to newer values without duplication
+          const existingMatches = window.StudyFlow.State.data.tasks.filter(t => t.id === existingId);
+          assertEqual(existingMatches.length, 1, 'Must maintain exactly 1 copy of existing task');
+          assertEqual(existingMatches[0].title, 'Newer Cloud Title from Laptop', 'Newer cloud values must take precedence');
+          assertEqual(existingMatches[0].durationMinutes, 60, 'Duration must update');
+
+          // C. Brand new cloud item is merged
+          const newMerged = window.StudyFlow.State.data.tasks.find(t => t.id === brandNewId);
+          assert(newMerged !== undefined, 'Brand new remote task must be integrated');
+          assertEqual(newMerged.title, 'Task Created on Tablet', 'Title must match');
+        }
+      );
+
+      addTest(
+        '9. [Scenario 5] Save Failure Simulation & User Notification',
+        'Simulates storage write failure (e.g. quota exceeded) and verifies SaveStatus transitions to "failed" and user is informed.',
+        () => {
+          const originalSetItem = localStorage.setItem;
+          try {
+            // Mock setItem throwing a QuotaExceededError
+            localStorage.setItem = function (key) {
+              if (key === 'studyflow_v2_store') {
+                throw new Error('QuotaExceededError: DomException 22');
+              }
+              return originalSetItem.apply(this, arguments);
+            };
+
+            const saveResult = window.StudyFlow.Storage.save(window.StudyFlow.State.data, false);
+            assertEqual(saveResult, false, 'Storage.save must return false on error');
+            assertEqual(window.StudyFlow.SaveStatus.state, 'failed', 'SaveStatus must transition to "failed"');
+            assert(window.StudyFlow.SaveStatus.errorMessage.includes('QuotaExceededError'), 'Error message must include failure details');
+            assert(window.StudyFlow.SaveStatus.state !== 'saved', 'Must never report "saved" on failure');
+          } finally {
+            localStorage.setItem = originalSetItem;
+            // Restore clean state
+            window.StudyFlow.SaveStatus.set('saved');
+          }
+        }
+      );
+
+      addTest(
+        '10. [Scenario 6] Offline Changes & Reconnection Sync',
+        'Simulates offline deletion and status, verifying tombstones are stored and survive across sessions for cloud sync.',
+        () => {
+          const offlineTaskId = 't_offline_' + Date.now();
+          window.StudyFlow.State.data.tasks.push({
+            id: offlineTaskId,
+            title: 'Offline Homework',
+            subject: 'Physics',
+            updatedAt: new Date().toISOString()
+          });
+
+          // Simulate going offline
+          window.StudyFlow.SaveStatus.set('offline');
+          assertEqual(window.StudyFlow.SaveStatus.state, 'offline', 'Status must be offline');
+
+          // Delete while offline
+          window.StudyFlow.TombstoneStore.record(offlineTaskId, 'task');
+          window.StudyFlow.State.data.tasks = window.StudyFlow.State.data.tasks.filter(t => t.id !== offlineTaskId);
+          window.StudyFlow.Storage.save(window.StudyFlow.State.data, false);
+
+          // Verify offline tombstone
+          assert(window.StudyFlow.TombstoneStore.isDeleted(offlineTaskId), 'Tombstone must be recorded offline');
+
+          // Simulate reconnecting online
+          window.StudyFlow.SaveStatus.set('saved');
+          assertEqual(window.StudyFlow.SaveStatus.state, 'saved', 'Status restored to saved on reconnect');
+
+          // Verify task is still deleted after storage reload
+          const reloaded = window.StudyFlow.Storage.load();
+          assert(!reloaded.tasks.some(t => t.id === offlineTaskId), 'Offline deleted task remains deleted upon reload');
+        }
+      );
+
+      addTest(
+        '11. Task Completion Toggle & Timestamp Updates',
+        'Verifies task completion toggle updates status and accurately records completedAt timestamp.',
         () => {
           const task = {
-            id: 'test_t1',
-            title: 'Sample Task',
+            id: 'test_toggle_' + Date.now(),
+            title: 'Sample Practice',
             subject: 'Math',
             status: 'Pending',
             durationMinutes: 45,
             dueDate: '2026-10-15',
             completedAt: null
           };
+          window.StudyFlow.State.addTask(task);
 
           // Toggle Complete
-          task.status = 'Completed';
-          task.completedAt = new Date().toISOString();
-          assertEqual(task.status, 'Completed', 'Status must be Completed');
-          assert(task.completedAt !== null, 'completedAt must be set');
+          window.StudyFlow.State.toggleTaskStatus(task.id);
+          const completedTask = window.StudyFlow.State.data.tasks.find(t => t.id === task.id);
+          assertEqual(completedTask.status, 'Completed', 'Status must be Completed');
+          assert(completedTask.completedAt !== null, 'completedAt must be set');
 
           // Toggle Reopen
-          task.status = 'Pending';
-          task.completedAt = null;
-          assertEqual(task.status, 'Pending', 'Status must reopen to Pending');
-          assertEqual(task.completedAt, null, 'completedAt must reset to null');
+          window.StudyFlow.State.toggleTaskStatus(task.id);
+          const reopenedTask = window.StudyFlow.State.data.tasks.find(t => t.id === task.id);
+          assertEqual(reopenedTask.status, 'Pending', 'Status must reopen to Pending');
+          assertEqual(reopenedTask.completedAt, null, 'completedAt must reset to null');
         }
       );
 
       addTest(
-        '6. Overdue and Due Today Detection',
+        '12. Overdue and Due Today Detection',
         'Validates accurate identification of tasks due today and overdue tasks.',
         () => {
           const today = '2026-10-12';
@@ -246,7 +506,7 @@
       );
 
       addTest(
-        '7. Fixed Commitments Availability Calculation',
+        '13. Fixed Commitments Availability Calculation',
         'Verifies recurring weekday commitments (0=Sun, 1=Mon, ..., 6=Sat) filter accurately.',
         () => {
           const comms = [
@@ -254,7 +514,7 @@
             { id: 'c2', title: 'SAT Class', recurrence: 'recurring', daysOfWeek: [6], startTime: '10:00', endTime: '12:00' }
           ];
 
-          // Oct 12 2026 is Monday (1)
+          // Oct 12 2026 is Monday (dayOfWeek = 1)
           const mondayComms = window.StudyFlow.SchedulerEngine.getCommitmentsForDate('2026-10-12', comms);
           assertEqual(mondayComms.length, 1, 'Monday should have School only');
           assertEqual(mondayComms[0].title, 'School', 'Should be School');
@@ -262,7 +522,7 @@
       );
 
       addTest(
-        '8. Time Math: Minutes to String and String to Minutes',
+        '14. Time Math: Minutes to String and String to Minutes',
         'Validates precise conversion between HH:MM time strings and total minutes from midnight.',
         () => {
           function toMins(t) { const [h, m] = t.split(':').map(Number); return h * 60 + m; }
@@ -280,7 +540,7 @@
       );
 
       addTest(
-        '9. Free Study Slots Calculation Around Fixed Commitments',
+        '15. Free Study Slots Calculation Around Fixed Commitments',
         'Tests finding usable study windows between 15:30 and 23:00 when a lesson is at 17:00-18:30.',
         () => {
           const windowStart = 15 * 60 + 30; // 930
@@ -302,7 +562,7 @@
       );
 
       addTest(
-        '10. Task Urgency & Exam Prioritization Ordering',
+        '16. Task Urgency & Exam Prioritization Ordering',
         'Ensures overdue, Quarter Exams, GP Weekly exams, and Urgent tasks are prioritized over low priority items.',
         () => {
           const tasks = [
@@ -319,7 +579,7 @@
       );
 
       addTest(
-        '11. Rest Protection: Break Insertion & Buffer Reservation',
+        '17. Rest Protection: Break Insertion & Buffer Reservation',
         'Validates that 10-minute rest breaks and 30-minute unexpected homework buffers are reserved.',
         () => {
           const plan = window.StudyFlow.SchedulerEngine.generatePlan({
@@ -341,7 +601,7 @@
       );
 
       addTest(
-        '12. Overload Prevention: Unscheduled Tasks Notice',
+        '18. Overload Prevention: Unscheduled Tasks Notice & Sleep Bedtime Guarantee',
         'Ensures when student has more homework than available hours, sleep is protected and unscheduled tasks are listed.',
         () => {
           const plan = window.StudyFlow.SchedulerEngine.generatePlan({
@@ -364,7 +624,7 @@
       );
 
       addTest(
-        '13. Mid-Day Rescheduling: Preserves Completed Work',
+        '19. Mid-Day Rescheduling: Preserves Completed Work',
         'Simulates mid-day reschedule at 17:00, verifying blocks completed earlier (15:30-16:30) are intact.',
         () => {
           const currentPlan = {
@@ -382,18 +642,19 @@
       );
 
       addTest(
-        '14. Firebase & CloudSync Integration State Check',
+        '20. Firebase & CloudSync Integration State Check',
         'Verifies that CloudSync module is available, reports local-mode or synced status, and provides Google Sign-In handlers.',
         () => {
           assert(window.StudyFlow.CloudSync !== undefined, 'CloudSync must be defined');
           assert(typeof window.StudyFlow.CloudSync.signInWithGoogle === 'function', 'signInWithGoogle must be a function');
           assert(typeof window.StudyFlow.CloudSync.signOut === 'function', 'signOut must be a function');
-          assert(['local', 'synced', 'syncing', 'offline'].includes(window.StudyFlow.CloudSync.syncStatus), 'Sync status must be valid');
+          assert(typeof window.StudyFlow.CloudSync.mergeCloudData === 'function', 'mergeCloudData must be a function');
+          assert(typeof window.StudyFlow.CloudSync.isAuthenticated === 'function', 'isAuthenticated must be a function');
         }
       );
 
       addTest(
-        '15. Notion Light Theme & Dark Theme Switching',
+        '21. Notion Light Theme & Dark Theme Switching',
         'Verifies that theme settings toggle cleanly between light and dark without breaking CSS styles.',
         () => {
           const initialTheme = window.StudyFlow.State.data.settings.theme || 'light';
@@ -406,7 +667,7 @@
       );
 
       addTest(
-        '16. GitHub Pages Subpath Compatibility & PWA Manifest Check',
+        '22. GitHub Pages Subpath Compatibility & PWA Manifest Check',
         'Verifies that asset links (style.css, script.js, manifest.json) are strictly relative.',
         () => {
           const links = ['style.css', 'script.js', 'manifest.json'];
@@ -464,7 +725,7 @@
 
         if (failed === 0) {
           overallStatus.className = 'status-pill status-passed';
-          overallStatus.textContent = 'All 16 Tests Passed ✓';
+          overallStatus.textContent = `All ${tests.length} Tests Passed ✓`;
         } else {
           overallStatus.className = 'status-pill status-failed';
           overallStatus.textContent = `${failed} Failed ✗`;

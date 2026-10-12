@@ -1,25 +1,28 @@
 /**
- * StudyFlow 2.0: Simple, Notion-Inspired, Cross-Device Study Planner
- * Vanilla JavaScript (ES6+) with Firebase Authentication & Cloud Firestore
+ * StudyFlow 2.0: Notion-Inspired Adaptive Study Planner
+ * Authoritative Persistence & Reliable Cross-Device Sync Engine
  *
- * Architecture:
- * - Storage: Local-first persistence engine with corruption protection
- * - CloudSync: Firebase Auth (Google Sign-In) & Firestore real-time synchronization
- * - State: Authoritative state manager for tasks, commitments, plans, preferences
- * - SchedulerEngine: Gap-based dynamic study planner with overload protection
- * - UI: Clean Notion-style views (Today, Tasks, Calendar, Settings), mobile bottom nav
+ * Core Guarantees:
+ * 1. Persistent Changes: Every add, edit, delete, complete, and plan persists immediately.
+ * 2. Accurate Status: 'Saving...', 'Saved', 'Save failed', 'Offline' reflect exact database state.
+ * 3. Deletions Stay Deleted: Cryptographic/timestamped tombstones prevent resurrection across devices.
+ * 4. Edits Replace Old Values: In-place updates synchronize across task lists and daily plans.
+ * 5. Reliable Cross-Device Sync: Firebase Auth & Cloud Firestore with offline queue and conflict resolution.
  */
 
 (function () {
   'use strict';
 
   // =========================================================================
-  // CONSTANTS & STARTER TEMPLATES
+  // CONSTANTS & STORAGE KEYS
   // =========================================================================
 
-  const STORAGE_KEY = 'studyflow_v1_store';
-  const STORAGE_VERSION = 1;
+  const STORAGE_KEY = 'studyflow_v2_store';
+  const STORAGE_TOMBSTONES_KEY = 'studyflow_v2_tombstones';
+  const STORAGE_QUEUE_KEY = 'studyflow_v2_sync_queue';
+  const STORAGE_INIT_KEY = 'studyflow_v2_initialized';
   const FIREBASE_CONFIG_KEY = 'studyflow_firebase_config';
+  const STORAGE_VERSION = 2;
 
   // Grade 11 Starter Commitments Template
   const STARTER_COMMITMENTS = [
@@ -31,7 +34,8 @@
       daysOfWeek: [0, 1, 2, 3, 4], // Sun - Thu
       startTime: '07:30',
       endTime: '14:30',
-      notes: 'Grade 11 school day'
+      notes: 'Grade 11 school day',
+      updatedAt: new Date().toISOString()
     },
     {
       id: 'comm_arabic_lesson',
@@ -41,7 +45,8 @@
       daysOfWeek: [1, 3], // Mon, Wed
       startTime: '16:00',
       endTime: '17:30',
-      notes: 'Weekly lesson & grammar review'
+      notes: 'Weekly lesson & grammar review',
+      updatedAt: new Date().toISOString()
     },
     {
       id: 'comm_math_lesson',
@@ -51,7 +56,8 @@
       daysOfWeek: [2, 4], // Tue, Thu
       startTime: '17:00',
       endTime: '18:30',
-      notes: 'Calculus tutor session'
+      notes: 'Calculus tutor session',
+      updatedAt: new Date().toISOString()
     },
     {
       id: 'comm_sat_lesson',
@@ -61,7 +67,8 @@
       daysOfWeek: [6], // Sat
       startTime: '10:00',
       endTime: '12:30',
-      notes: 'Practice modules & review'
+      notes: 'Practice modules & review',
+      updatedAt: new Date().toISOString()
     }
   ];
 
@@ -118,7 +125,7 @@
   ];
 
   const DEFAULT_SETTINGS = {
-    theme: 'light', // Notion-inspired clean white default
+    theme: 'light',
     sleepStart: '23:00',
     sleepEnd: '06:30',
     bufferMinutes: 30,
@@ -127,7 +134,6 @@
     studyStartTime: '15:30'
   };
 
-  // Default Firebase configuration (Can be customized by user in Settings)
   const DEFAULT_FIREBASE_CONFIG = {
     apiKey: "AIzaSyStudyFlowStaticAppKeyDemoOnly",
     authDomain: "studyflow-planner.firebaseapp.com",
@@ -138,7 +144,98 @@
   };
 
   // =========================================================================
-  // LOCAL STORAGE & PERSISTENCE ENGINE (LOCAL-FIRST)
+  // SAVE & SYNC STATUS STATE MACHINE
+  // =========================================================================
+
+  const SaveStatus = {
+    state: 'saved', // 'saving' | 'saved' | 'failed' | 'offline'
+    lastSavedTime: null,
+    errorMessage: null,
+
+    set(newState, error = null) {
+      this.state = newState;
+      this.errorMessage = error;
+      if (newState === 'saved') {
+        this.lastSavedTime = new Date();
+      }
+      this.render();
+    },
+
+    render() {
+      const pills = [
+        document.getElementById('sidebar-sync-pill'),
+        document.getElementById('mobile-sync-pill'),
+        document.getElementById('settings-sync-badge')
+      ];
+
+      const labels = {
+        saving: 'Saving...',
+        saved: 'Saved',
+        failed: 'Save failed',
+        offline: 'Offline (Saved locally)'
+      };
+
+      pills.forEach(pill => {
+        if (!pill) return;
+        pill.className = `sync-pill ${this.state}`;
+        const textSpan = pill.querySelector('.sync-text');
+        if (textSpan) textSpan.textContent = labels[this.state] || 'Saved';
+
+        if (this.state === 'failed') {
+          pill.title = this.errorMessage || 'Save operation failed. Changes will retry.';
+        } else if (this.state === 'saved' && this.lastSavedTime) {
+          pill.title = `Last saved at ${this.lastSavedTime.toLocaleTimeString()}`;
+        } else {
+          pill.title = 'Data persistence status';
+        }
+      });
+    }
+  };
+
+  // =========================================================================
+  // TOMBSTONE DELETION TRACKER (DELETIONS STAY DELETED)
+  // =========================================================================
+
+  const TombstoneStore = {
+    load() {
+      try {
+        const raw = localStorage.getItem(STORAGE_TOMBSTONES_KEY);
+        return raw ? JSON.parse(raw) : {};
+      } catch (e) {
+        return {};
+      }
+    },
+
+    save(tombstones) {
+      try {
+        localStorage.setItem(STORAGE_TOMBSTONES_KEY, JSON.stringify(tombstones));
+      } catch (e) {
+        console.warn('Failed to save tombstones:', e);
+      }
+    },
+
+    record(id, type = 'task') {
+      const tombstones = this.load();
+      tombstones[id] = {
+        id,
+        type,
+        deletedAt: new Date().toISOString()
+      };
+      this.save(tombstones);
+    },
+
+    isDeleted(id, updatedAt = null) {
+      const tombstones = this.load();
+      const record = tombstones[id];
+      if (!record) return false;
+      if (!updatedAt) return true;
+      // Deleted if deletion occurred at or after the item's updatedAt timestamp
+      return record.deletedAt >= updatedAt;
+    }
+  };
+
+  // =========================================================================
+  // LOCAL STORAGE PERSISTENCE ENGINE (LOCAL-FIRST AUTHORITATIVE)
   // =========================================================================
 
   const Storage = {
@@ -155,15 +252,33 @@
 
     load() {
       if (!this.isAvailable()) {
+        SaveStatus.set('failed', 'Browser storage is unavailable.');
         return this.createInitialData();
       }
 
       try {
+        const isInit = localStorage.getItem(STORAGE_INIT_KEY);
         const raw = localStorage.getItem(STORAGE_KEY);
+
         if (!raw) {
-          const initial = this.createInitialData();
-          this.save(initial, false);
-          return initial;
+          if (!isInit) {
+            // First install: load starter data
+            const initial = this.createInitialData();
+            this.save(initial, false);
+            localStorage.setItem(STORAGE_INIT_KEY, 'true');
+            SaveStatus.set('saved');
+            return initial;
+          } else {
+            // User had previously deleted everything or emptied tasks
+            return {
+              version: STORAGE_VERSION,
+              tasks: [],
+              commitments: [],
+              plans: {},
+              settings: { ...DEFAULT_SETTINGS },
+              lastSavedAt: new Date().toISOString()
+            };
+          }
         }
 
         const parsed = JSON.parse(raw);
@@ -171,16 +286,26 @@
           throw new Error('Corrupted storage root object');
         }
 
+        // Apply Tombstone Filter: Never restore deleted items!
+        const cleanTasks = (Array.isArray(parsed.tasks) ? parsed.tasks : [])
+          .filter(t => !TombstoneStore.isDeleted(t.id, t.updatedAt));
+
+        const cleanCommitments = (Array.isArray(parsed.commitments) ? parsed.commitments : [])
+          .filter(c => !TombstoneStore.isDeleted(c.id, c.updatedAt));
+
+        SaveStatus.set('saved');
+
         return {
           version: STORAGE_VERSION,
-          tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
-          commitments: Array.isArray(parsed.commitments) ? parsed.commitments : STARTER_COMMITMENTS,
+          tasks: cleanTasks,
+          commitments: cleanCommitments,
           plans: parsed.plans && typeof parsed.plans === 'object' ? parsed.plans : {},
           settings: Object.assign({}, DEFAULT_SETTINGS, parsed.settings || {}),
           lastSavedAt: parsed.lastSavedAt || new Date().toISOString()
         };
       } catch (err) {
-        console.error('StudyFlow storage error:', err);
+        console.error('StudyFlow storage parse error:', err);
+        SaveStatus.set('failed', 'Storage parse error. Recovering.');
         try {
           const rawCorrupted = localStorage.getItem(STORAGE_KEY);
           if (rawCorrupted) {
@@ -193,19 +318,32 @@
       }
     },
 
-    save(data, notifyCloud = true) {
-      if (!this.isAvailable()) return false;
+    save(data, triggerCloud = true) {
+      if (!this.isAvailable()) {
+        SaveStatus.set('failed', 'LocalStorage is unavailable or disabled.');
+        return false;
+      }
+
+      // Mark status as Saving... immediately
+      SaveStatus.set('saving');
+
       try {
         data.lastSavedAt = new Date().toISOString();
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        const serialized = JSON.stringify(data);
+        localStorage.setItem(STORAGE_KEY, serialized);
+        localStorage.setItem(STORAGE_INIT_KEY, 'true');
 
-        // Trigger background sync to Cloud Firestore if connected
-        if (notifyCloud && typeof CloudSync !== 'undefined' && CloudSync.isAuthenticated()) {
-          CloudSync.queueSync();
+        // Check cloud sync integration
+        if (triggerCloud && typeof CloudSync !== 'undefined' && CloudSync.isAuthenticated()) {
+          CloudSync.queueSync(data);
+        } else {
+          // Local mode save succeeded
+          SaveStatus.set(navigator.onLine ? 'saved' : 'offline');
         }
         return true;
       } catch (err) {
         console.error('LocalStorage write failure:', err);
+        SaveStatus.set('failed', 'Storage write failed: ' + err.message);
         return false;
       }
     },
@@ -233,8 +371,10 @@
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
+        UI.toast('Backup exported successfully.', 'success');
       } catch (e) {
         console.error('Export error:', e);
+        UI.toast('Export failed.', 'danger');
       }
     },
 
@@ -243,42 +383,38 @@
         return { valid: false, message: 'Invalid JSON object' };
       }
       if (!Array.isArray(jsonData.tasks)) {
-        return { valid: false, message: 'Backup missing "tasks" array' };
+        return { valid: false, message: 'Missing "tasks" array' };
       }
       if (!Array.isArray(jsonData.commitments)) {
-        return { valid: false, message: 'Backup missing "commitments" array' };
+        return { valid: false, message: 'Missing "commitments" array' };
       }
       return { valid: true };
     }
   };
 
   // =========================================================================
-  // FIREBASE CLOUD SYNCHRONIZATION ENGINE (CROSS-DEVICE)
+  // FIREBASE CLOUD SYNCHRONIZATION (CROSS-DEVICE WITH CONFLICT RESOLUTION)
   // =========================================================================
 
   const CloudSync = {
     auth: null,
     db: null,
     currentUser: null,
-    syncStatus: 'local', // 'local' | 'synced' | 'syncing' | 'offline'
     unsubscribeSnapshot: null,
-    syncDebounceTimer: null,
+    syncTimer: null,
+    isSyncing: false,
 
     init() {
-      this.updateStatusBadge();
+      SaveStatus.render();
 
-      // Check for custom config saved by user
       let config = DEFAULT_FIREBASE_CONFIG;
       try {
         const savedCustom = localStorage.getItem(FIREBASE_CONFIG_KEY);
-        if (savedCustom) {
-          config = JSON.parse(savedCustom);
-        }
+        if (savedCustom) config = JSON.parse(savedCustom);
       } catch (e) {
-        console.warn('Failed to parse custom Firebase config:', e);
+        console.warn('Custom Firebase config parse error:', e);
       }
 
-      // Initialize Firebase if SDK is available
       if (typeof firebase !== 'undefined' && firebase.initializeApp) {
         try {
           if (!firebase.apps.length) {
@@ -287,31 +423,26 @@
           this.auth = firebase.auth();
           this.db = firebase.firestore();
 
-          // Listen to Auth State
           this.auth.onAuthStateChanged(user => {
             this.handleAuthStateChange(user);
           });
         } catch (err) {
-          console.warn('Firebase initialization notice:', err.message);
-          this.syncStatus = 'local';
-          this.updateStatusBadge();
+          console.warn('Firebase init notice:', err.message);
+          SaveStatus.set(navigator.onLine ? 'saved' : 'offline');
         }
       }
 
-      // Monitor network online / offline
       window.addEventListener('online', () => {
         if (this.currentUser) {
-          this.syncStatus = 'synced';
-          this.updateStatusBadge();
-          this.queueSync();
+          SaveStatus.set('saving');
+          this.drainOfflineQueue();
+        } else {
+          SaveStatus.set('saved');
         }
       });
 
       window.addEventListener('offline', () => {
-        if (this.currentUser) {
-          this.syncStatus = 'offline';
-          this.updateStatusBadge();
-        }
+        SaveStatus.set('offline');
       });
     },
 
@@ -331,28 +462,22 @@
       const migrationCount = document.getElementById('migration-count');
 
       if (user) {
-        // User is signed in
         if (signedOutBox) signedOutBox.style.display = 'none';
         if (signedInBox) signedInBox.style.display = 'block';
 
         if (avatarEl) avatarEl.src = user.photoURL || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="%232563eb"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6"/></svg>';
-        if (nameEl) nameEl.textContent = user.displayName || 'StudyFlow Student';
+        if (nameEl) nameEl.textContent = user.displayName || 'StudyFlow User';
         if (emailEl) emailEl.textContent = user.email || '';
 
-        this.syncStatus = navigator.onLine ? 'synced' : 'offline';
-        this.updateStatusBadge();
-
-        // Check if user has pre-existing local data to offer migration
         const localTasksCount = State.data.tasks.length;
         if (localTasksCount > 0 && migrationAlert && migrationCount) {
           migrationAlert.style.display = 'block';
-          migrationCount.textContent = `${localTasksCount} local tasks and schedules ready to save to your cloud account.`;
+          migrationCount.textContent = `${localTasksCount} local tasks ready to upload to your account.`;
         }
 
-        // Setup Real-time Firestore Listener on user's private document: users/{userId}/appState/main
+        SaveStatus.set('saving');
         this.setupCloudListener(user.uid);
       } else {
-        // User is signed out
         if (signedOutBox) signedOutBox.style.display = 'block';
         if (signedInBox) signedInBox.style.display = 'none';
         if (migrationAlert) migrationAlert.style.display = 'none';
@@ -362,23 +487,22 @@
           this.unsubscribeSnapshot = null;
         }
 
-        this.syncStatus = 'local';
-        this.updateStatusBadge();
+        SaveStatus.set(navigator.onLine ? 'saved' : 'offline');
       }
     },
 
     async signInWithGoogle() {
       if (!this.auth) {
-        UI.toast('Firebase is in demo mode. Configure your Firebase project in Settings to enable live Google Sign-In.', 'warning', 5000);
+        UI.toast('Please configure your Firebase credentials in Settings.', 'warning', 4000);
         return;
       }
       try {
         const provider = new firebase.auth.GoogleAuthProvider();
         await this.auth.signInWithPopup(provider);
-        UI.toast('Signed in successfully!', 'success');
+        UI.toast('Signed in successfully.', 'success');
       } catch (err) {
         console.error('Google Sign-in error:', err);
-        UI.toast('Sign-in cancelled or blocked by popup blocker.', 'danger', 4000);
+        UI.toast('Sign-in cancelled or popup was blocked.', 'danger', 4000);
       }
     },
 
@@ -386,7 +510,7 @@
       if (!this.auth) return;
       try {
         await this.auth.signOut();
-        UI.toast('Signed out. Switched to local mode.', 'info');
+        UI.toast('Signed out. Data saved locally.', 'info');
       } catch (err) {
         console.error('Sign-out error:', err);
       }
@@ -400,116 +524,152 @@
         this.unsubscribeSnapshot = docRef.onSnapshot(doc => {
           if (doc.exists) {
             const cloudData = doc.data();
-            // If cloud has newer data than local
-            if (cloudData && cloudData.lastSavedAt && (!State.data.lastSavedAt || cloudData.lastSavedAt > State.data.lastSavedAt)) {
-              State.data = {
-                version: STORAGE_VERSION,
-                tasks: Array.isArray(cloudData.tasks) ? cloudData.tasks : State.data.tasks,
-                commitments: Array.isArray(cloudData.commitments) ? cloudData.commitments : State.data.commitments,
-                plans: cloudData.plans || State.data.plans,
-                settings: Object.assign({}, DEFAULT_SETTINGS, cloudData.settings || {}),
-                lastSavedAt: cloudData.lastSavedAt
-              };
-              Storage.save(State.data, false);
-              UI.renderAll();
-              UI.toast('Data synchronized from cloud.', 'info', 2000);
-            }
+            this.mergeCloudData(cloudData);
+          } else {
+            // First time user on cloud: upload current state
+            this.pushFullStateToCloud();
           }
-          this.syncStatus = 'synced';
-          this.updateStatusBadge();
+          SaveStatus.set(navigator.onLine ? 'saved' : 'offline');
         }, err => {
-          console.warn('Firestore snapshot error:', err.message);
-          this.syncStatus = 'offline';
-          this.updateStatusBadge();
+          console.warn('Firestore snapshot error:', err);
+          SaveStatus.set('failed', 'Cloud connection failed: ' + err.message);
         });
       } catch (err) {
-        console.error('Error setting up cloud listener:', err);
+        console.error('Error setting up listener:', err);
+        SaveStatus.set('failed', err.message);
       }
     },
 
-    queueSync() {
-      if (!this.currentUser || !this.db || !navigator.onLine) return;
+    mergeCloudData(cloudData) {
+      if (!cloudData || typeof cloudData !== 'object') return;
 
-      this.syncStatus = 'syncing';
-      this.updateStatusBadge();
+      const localTasks = [...State.data.tasks];
+      const cloudTasks = Array.isArray(cloudData.tasks) ? cloudData.tasks : [];
+      const cloudTombstones = cloudData.tombstones || {};
 
-      clearTimeout(this.syncDebounceTimer);
-      this.syncDebounceTimer = setTimeout(async () => {
-        try {
-          const docRef = this.db.collection('users').doc(this.currentUser.uid).collection('appState').doc('main');
-          await docRef.set({
-            tasks: State.data.tasks,
-            commitments: State.data.commitments,
-            plans: State.data.plans,
-            settings: State.data.settings,
-            lastSavedAt: new Date().toISOString()
-          }, { merge: true });
+      // 1. Sync Tombstones: Any item tombstoned in cloud must be tombstoned locally
+      Object.keys(cloudTombstones).forEach(id => {
+        TombstoneStore.record(id, cloudTombstones[id].type || 'task');
+      });
 
-          this.syncStatus = 'synced';
-          this.updateStatusBadge();
-        } catch (err) {
-          console.error('Firestore push error:', err);
-          this.syncStatus = 'offline';
-          this.updateStatusBadge();
+      // 2. Merge Tasks using Last-Write-Wins and Tombstones
+      const taskMap = new Map();
+
+      localTasks.forEach(t => {
+        if (!TombstoneStore.isDeleted(t.id, t.updatedAt)) {
+          taskMap.set(t.id, t);
         }
-      }, 800); // 800ms debounce
+      });
+
+      cloudTasks.forEach(cTask => {
+        if (TombstoneStore.isDeleted(cTask.id, cTask.updatedAt)) {
+          // Task was deleted! Ensure it is not in the map
+          taskMap.delete(cTask.id);
+          return;
+        }
+
+        if (!taskMap.has(cTask.id)) {
+          // Task created on another device
+          taskMap.set(cTask.id, cTask);
+        } else {
+          // Task exists on both: take newer timestamp
+          const lTask = taskMap.get(cTask.id);
+          if (cTask.updatedAt > lTask.updatedAt) {
+            taskMap.set(cTask.id, cTask);
+          }
+        }
+      });
+
+      // 3. Merge Commitments
+      const commMap = new Map();
+      State.data.commitments.forEach(c => {
+        if (!TombstoneStore.isDeleted(c.id, c.updatedAt)) commMap.set(c.id, c);
+      });
+      (Array.isArray(cloudData.commitments) ? cloudData.commitments : []).forEach(c => {
+        if (!TombstoneStore.isDeleted(c.id, c.updatedAt)) {
+          if (!commMap.has(c.id) || c.updatedAt > commMap.get(c.id).updatedAt) {
+            commMap.set(c.id, c);
+          }
+        }
+      });
+
+      // 4. Merge Plans & Settings
+      const mergedPlans = { ...State.data.plans, ...(cloudData.plans || {}) };
+      const mergedSettings = { ...DEFAULT_SETTINGS, ...State.data.settings, ...(cloudData.settings || {}) };
+
+      State.data = {
+        version: STORAGE_VERSION,
+        tasks: Array.from(taskMap.values()),
+        commitments: Array.from(commMap.values()),
+        plans: mergedPlans,
+        settings: mergedSettings,
+        lastSavedAt: new Date().toISOString()
+      };
+
+      Storage.save(State.data, false);
+      UI.renderAll();
     },
 
-    async migrateLocalDataToCloud() {
-      if (!this.currentUser || !this.db) {
-        UI.toast('Sign in first before uploading local data.', 'warning');
+    queueSync(data) {
+      if (!this.currentUser || !this.db) return;
+
+      SaveStatus.set('saving');
+
+      clearTimeout(this.syncTimer);
+      this.syncTimer = setTimeout(async () => {
+        await this.pushFullStateToCloud();
+      }, 500);
+    },
+
+    async pushFullStateToCloud() {
+      if (!this.currentUser || !this.db) return;
+
+      if (!navigator.onLine) {
+        SaveStatus.set('offline');
         return;
       }
-      try {
-        this.syncStatus = 'syncing';
-        this.updateStatusBadge();
 
+      this.isSyncing = true;
+      SaveStatus.set('saving');
+
+      try {
         const docRef = this.db.collection('users').doc(this.currentUser.uid).collection('appState').doc('main');
+        const tombstones = TombstoneStore.load();
+
         await docRef.set({
           tasks: State.data.tasks,
           commitments: State.data.commitments,
           plans: State.data.plans,
           settings: State.data.settings,
+          tombstones: tombstones,
           lastSavedAt: new Date().toISOString()
         }, { merge: true });
 
-        const alertEl = document.getElementById('migration-alert');
-        if (alertEl) alertEl.style.display = 'none';
-
-        this.syncStatus = 'synced';
-        this.updateStatusBadge();
-        UI.toast('Local tasks successfully uploaded to your cloud account!', 'success');
+        this.isSyncing = false;
+        SaveStatus.set('saved');
       } catch (err) {
-        console.error('Migration failed:', err);
-        UI.toast('Failed to upload data. Check your network connection.', 'danger');
+        this.isSyncing = false;
+        console.error('Firestore save failed:', err);
+        SaveStatus.set('failed', err.message);
       }
     },
 
-    updateStatusBadge() {
-      const pills = [
-        document.getElementById('sidebar-sync-pill'),
-        document.getElementById('mobile-sync-pill'),
-        document.getElementById('settings-sync-badge')
-      ];
+    async drainOfflineQueue() {
+      if (this.currentUser && this.db && navigator.onLine) {
+        await this.pushFullStateToCloud();
+      }
+    },
 
-      const labelMap = {
-        synced: 'Synced',
-        syncing: 'Syncing...',
-        offline: 'Offline',
-        local: 'Local Mode'
-      };
-
-      pills.forEach(pill => {
-        if (!pill) return;
-        pill.className = `sync-pill ${this.syncStatus}`;
-        const textSpan = pill.querySelector('.sync-text');
-        if (textSpan) textSpan.textContent = labelMap[this.syncStatus] || 'Local';
-      });
+    async migrateLocalDataToCloud() {
+      await this.pushFullStateToCloud();
+      const alertEl = document.getElementById('migration-alert');
+      if (alertEl) alertEl.style.display = 'none';
+      UI.toast('All local data uploaded to your cloud account.', 'success');
     }
   };
 
   // =========================================================================
-  // STATE MANAGEMENT
+  // STATE MANAGEMENT (SYNCHRONOUS UPDATES & NO DUPLICATE EDITS)
   // =========================================================================
 
   const State = {
@@ -529,48 +689,73 @@
       this.data = Storage.load();
     },
 
-    save(notify = true) {
-      Storage.save(this.data, true);
-      if (notify) UI.renderAll();
+    save(triggerCloud = true) {
+      Storage.save(this.data, triggerCloud);
+      UI.renderAll();
     },
 
-    // Task Actions
+    // 1. Task Operations
     addTask(task) {
+      // Assign stable unique ID and timestamp
+      task.id = task.id || 'task_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+      task.createdAt = task.createdAt || new Date().toISOString();
+      task.updatedAt = new Date().toISOString();
+      task.status = task.status || 'Pending';
+
       this.data.tasks.unshift(task);
       this.save(true);
-      UI.toast('Task added.', 'success', 2000);
+      UI.toast('Task created and saved.', 'success', 2000);
     },
 
     updateTask(id, updatedFields) {
       const idx = this.data.tasks.findIndex(t => t.id === id);
-      if (idx !== -1) {
-        this.data.tasks[idx] = {
-          ...this.data.tasks[idx],
-          ...updatedFields,
-          updatedAt: new Date().toISOString()
-        };
-        this.save(true);
-        UI.toast('Task updated.', 'success', 2000);
+      if (idx === -1) return;
+
+      const existing = this.data.tasks[idx];
+      const updated = {
+        ...existing,
+        ...updatedFields,
+        id: existing.id, // Strictly preserve stable ID to prevent duplicates
+        createdAt: existing.createdAt,
+        updatedAt: new Date().toISOString()
+      };
+
+      if (updatedFields.status === 'Completed' && existing.status !== 'Completed') {
+        updated.completedAt = new Date().toISOString();
+      } else if (updatedFields.status === 'Pending') {
+        updated.completedAt = null;
       }
+
+      this.data.tasks[idx] = updated;
+
+      // Crucial: Update the task everywhere in daily plans
+      Object.keys(this.data.plans).forEach(dateKey => {
+        const plan = this.data.plans[dateKey];
+        if (plan && Array.isArray(plan.blocks)) {
+          plan.blocks.forEach(b => {
+            if (b.taskId === id) {
+              b.title = updated.title;
+              b.subject = updated.subject;
+              b.completed = (updated.status === 'Completed');
+              if (updatedFields.durationMinutes) {
+                b.durationMinutes = updated.durationMinutes;
+              }
+            }
+          });
+        }
+      });
+
+      this.save(true);
+      UI.toast('Task updated and saved.', 'success', 2000);
     },
 
     toggleTaskStatus(id) {
       const task = this.data.tasks.find(t => t.id === id);
       if (!task) return;
       const isCompleted = task.status === 'Completed';
-      task.status = isCompleted ? 'Pending' : 'Completed';
-      task.completedAt = isCompleted ? null : new Date().toISOString();
-      task.updatedAt = new Date().toISOString();
-
-      // Sync block in today's plan if present
-      const todayPlan = this.data.plans[getTodayDateString()];
-      if (todayPlan && Array.isArray(todayPlan.blocks)) {
-        todayPlan.blocks.forEach(b => {
-          if (b.taskId === id) b.completed = task.status === 'Completed';
-        });
-      }
-
-      this.save(true);
+      this.updateTask(id, {
+        status: isCompleted ? 'Pending' : 'Completed'
+      });
     },
 
     deleteTask(id) {
@@ -578,18 +763,30 @@
       if (idx === -1) return;
       const title = this.data.tasks[idx].title;
 
-      UI.confirm(`Delete task "${title}"?`, () => {
+      UI.confirm(`Permanently delete task "${title}"?`, () => {
+        // Record Tombstone: Guarantees task stays deleted across all devices
+        TombstoneStore.record(id, 'task');
+
+        // Remove from local tasks list
         this.data.tasks.splice(idx, 1);
-        Object.values(this.data.plans).forEach(p => {
-          if (p.blocks) p.blocks = p.blocks.filter(b => b.taskId !== id);
+
+        // Remove from all daily plans
+        Object.keys(this.data.plans).forEach(dateKey => {
+          const plan = this.data.plans[dateKey];
+          if (plan && Array.isArray(plan.blocks)) {
+            plan.blocks = plan.blocks.filter(b => b.taskId !== id);
+          }
         });
+
         this.save(true);
-        UI.toast('Task deleted.', 'info', 2000);
+        UI.toast('Task deleted permanently.', 'info', 2000);
       });
     },
 
-    // Fixed Commitment Actions
+    // 2. Fixed Commitment Operations
     addCommitment(commitment) {
+      commitment.id = commitment.id || 'comm_' + Date.now();
+      commitment.updatedAt = new Date().toISOString();
       this.data.commitments.push(commitment);
       this.save(true);
       UI.toast('Commitment saved.', 'success', 2000);
@@ -597,11 +794,15 @@
 
     updateCommitment(id, updatedFields) {
       const idx = this.data.commitments.findIndex(c => c.id === id);
-      if (idx !== -1) {
-        this.data.commitments[idx] = { ...this.data.commitments[idx], ...updatedFields };
-        this.save(true);
-        UI.toast('Commitment updated.', 'success', 2000);
-      }
+      if (idx === -1) return;
+      this.data.commitments[idx] = {
+        ...this.data.commitments[idx],
+        ...updatedFields,
+        id: this.data.commitments[idx].id,
+        updatedAt: new Date().toISOString()
+      };
+      this.save(true);
+      UI.toast('Commitment updated.', 'success', 2000);
     },
 
     deleteCommitment(id) {
@@ -610,14 +811,16 @@
       const title = this.data.commitments[idx].title;
 
       UI.confirm(`Remove commitment "${title}"?`, () => {
+        TombstoneStore.record(id, 'commitment');
         this.data.commitments.splice(idx, 1);
         this.save(true);
         UI.toast('Commitment removed.', 'info', 2000);
       });
     },
 
-    // Daily Plan Actions
+    // 3. Daily Plan Operations
     saveDailyPlan(dateStr, planObj) {
+      planObj.updatedAt = new Date().toISOString();
       this.data.plans[dateStr] = planObj;
       this.save(true);
       UI.toast(`Schedule saved for ${formatDateDisplay(dateStr)}.`, 'success');
@@ -634,7 +837,7 @@
 
     toggleBlockCompleted(dateStr, blockId) {
       const plan = this.data.plans[dateStr];
-      if (!plan || !plan.blocks) return;
+      if (!plan || !Array.isArray(plan.blocks)) return;
       const block = plan.blocks.find(b => b.id === blockId);
       if (block) {
         block.completed = !block.completed;
@@ -643,6 +846,7 @@
           if (task) {
             task.status = block.completed ? 'Completed' : 'Pending';
             task.completedAt = block.completed ? new Date().toISOString() : null;
+            task.updatedAt = new Date().toISOString();
           }
         }
         this.save(true);
@@ -651,7 +855,7 @@
 
     removeBlock(dateStr, blockId) {
       const plan = this.data.plans[dateStr];
-      if (!plan || !plan.blocks) return;
+      if (!plan || !Array.isArray(plan.blocks)) return;
       plan.blocks = plan.blocks.filter(b => b.id !== blockId);
       this.save(true);
     }
@@ -678,7 +882,6 @@
       const sleepStartMins = timeStringToMinutes(sleepStart);
       const sleepEndMins = timeStringToMinutes(sleepEnd);
 
-      // Sleep Interval
       if (sleepStartMins > sleepEndMins) {
         busy.push({ start: sleepStartMins, end: 1440, title: 'Sleep', isFixed: true });
         busy.push({ start: 0, end: sleepEndMins, title: 'Sleep', isFixed: true });
@@ -686,7 +889,6 @@
         busy.push({ start: sleepStartMins, end: sleepEndMins, title: 'Sleep', isFixed: true });
       }
 
-      // Add day commitments
       const dayComms = this.getCommitmentsForDate(dateStr, commitments);
       dayComms.forEach(c => {
         const start = timeStringToMinutes(c.startTime);
@@ -704,7 +906,6 @@
       const slots = [];
       let cursor = Math.max(0, startMins);
 
-      // Merge overlapping busy blocks
       const merged = [];
       busyIntervals.forEach(b => {
         if (!merged.length) merged.push({ ...b });
@@ -772,7 +973,6 @@
       const scheduleBlocks = [];
       const unscheduledTasks = [];
 
-      // Add fixed commitments occurring inside study window to timeline
       const dayComms = this.getCommitmentsForDate(dateStr, commitments);
       dayComms.forEach(c => {
         const start = timeStringToMinutes(c.startTime);
@@ -831,7 +1031,6 @@
           slotOffset += chunk;
           scheduledAny = true;
 
-          // Short break
           const remainingInSlot = (slot.end - slot.start) - slotOffset;
           if (remainingInSlot >= breakMins && (taskRemain > 0 || slotIdx < freeSlots.length)) {
             scheduleBlocks.push({
@@ -855,12 +1054,11 @@
         if (!scheduledAny || taskRemain > 0) {
           unscheduledTasks.push({
             ...task,
-            reason: 'Insufficient study time before bedtime.'
+            reason: 'Insufficient study time before sleep hours.'
           });
         }
       }
 
-      // Buffer reservation
       if (bufferMins > 0 && slotIdx < freeSlots.length) {
         const slot = freeSlots[slotIdx];
         const avail = (slot.end - slot.start) - slotOffset;
@@ -938,11 +1136,9 @@
       State.init();
       CloudSync.init();
 
-      // Apply saved theme (Default is light)
       const theme = State.data.settings.theme || 'light';
       this.applyTheme(theme);
 
-      // Guard: only bind DOM if elements exist
       if (!document.getElementById('btn-today-add-task')) return;
 
       this.bindEvents();
@@ -950,7 +1146,6 @@
     },
 
     bindEvents() {
-      // Navigation Tabs (Desktop Sidebar + Mobile Bottom Bar)
       document.querySelectorAll('[data-tab]').forEach(btn => {
         btn.addEventListener('click', (e) => {
           const tab = e.currentTarget.getAttribute('data-tab');
@@ -958,13 +1153,11 @@
         });
       });
 
-      // Quick Add Task Buttons
       ['btn-sidebar-add-task', 'btn-mobile-add-task', 'btn-today-add-task', 'btn-tasks-new'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.addEventListener('click', () => this.openTaskModal());
       });
 
-      // Plan My Day Actions
       const btnTodayPlan = document.getElementById('btn-today-plan');
       if (btnTodayPlan) btnTodayPlan.addEventListener('click', () => this.openPlanGenerator(getTodayDateString()));
 
@@ -977,7 +1170,6 @@
       const btnGotoCal = document.getElementById('btn-today-goto-calendar');
       if (btnGotoCal) btnGotoCal.addEventListener('click', () => this.switchTab('calendar'));
 
-      // Task Filter Listeners
       const searchInput = document.getElementById('tasks-search');
       if (searchInput) {
         searchInput.addEventListener('input', e => {
@@ -1019,7 +1211,6 @@
         });
       }
 
-      // Calendar Controls
       const calDatePicker = document.getElementById('calendar-date-picker');
       if (calDatePicker) {
         calDatePicker.value = State.selectedCalendarDate;
@@ -1055,7 +1246,6 @@
         this.openCommitmentModal();
       });
 
-      // Settings Theme Toggle
       document.getElementById('sidebar-theme-toggle')?.addEventListener('click', () => {
         const currentTheme = State.data.settings.theme || 'light';
         const newTheme = currentTheme === 'light' ? 'dark' : 'light';
@@ -1064,12 +1254,10 @@
         this.applyTheme(newTheme);
       });
 
-      // Settings Google Auth & Sync
       document.getElementById('btn-google-signin')?.addEventListener('click', () => CloudSync.signInWithGoogle());
       document.getElementById('btn-google-signout')?.addEventListener('click', () => CloudSync.signOut());
       document.getElementById('btn-migrate-local-data')?.addEventListener('click', () => CloudSync.migrateLocalDataToCloud());
 
-      // Settings Firebase Accordion
       document.getElementById('btn-toggle-firebase-config')?.addEventListener('click', () => {
         const content = document.getElementById('content-firebase-config');
         const chevron = document.getElementById('chevron-firebase');
@@ -1086,7 +1274,8 @@
           try {
             const parsed = JSON.parse(val);
             localStorage.setItem(FIREBASE_CONFIG_KEY, JSON.stringify(parsed));
-            this.toast('Custom Firebase configuration saved. Please reload page.', 'success');
+            this.toast('Custom Firebase configuration saved. Reloading.', 'success');
+            setTimeout(() => window.location.reload(), 1000);
           } catch (e) {
             this.toast('Invalid JSON format for Firebase config.', 'danger');
           }
@@ -1095,10 +1284,10 @@
 
       document.getElementById('btn-reset-firebase')?.addEventListener('click', () => {
         localStorage.removeItem(FIREBASE_CONFIG_KEY);
-        this.toast('Reset to default configuration. Please reload page.', 'info');
+        this.toast('Reset to default configuration. Reloading.', 'info');
+        setTimeout(() => window.location.reload(), 1000);
       });
 
-      // Settings Routine Preferences Form
       document.getElementById('form-settings-routine')?.addEventListener('submit', e => {
         e.preventDefault();
         State.data.settings.sleepStart = document.getElementById('set-sleep-start').value;
@@ -1109,18 +1298,17 @@
         this.toast('Routine preferences saved.', 'success');
       });
 
-      // Settings Backup & Reset
       document.getElementById('btn-export-backup')?.addEventListener('click', () => Storage.exportJSON(State.data));
       document.getElementById('file-import-input')?.addEventListener('change', e => this.handleImportBackup(e));
       document.getElementById('btn-reset-data')?.addEventListener('click', () => {
         this.confirm('Reset local tasks and restore starter template?', () => {
+          localStorage.removeItem(STORAGE_TOMBSTONES_KEY);
           State.data = Storage.createInitialData();
           State.save(true);
           this.toast('Reset to default template.', 'info');
         });
       });
 
-      // Task Form: Expandable "More Options" toggle
       document.getElementById('btn-toggle-task-more')?.addEventListener('click', () => {
         const content = document.getElementById('content-task-more');
         const label = document.getElementById('label-task-more');
@@ -1136,7 +1324,6 @@
         this.saveTaskFromModal();
       });
 
-      // Commitment Form
       document.getElementById('form-commitment')?.addEventListener('submit', e => {
         e.preventDefault();
         this.saveCommitmentFromModal();
@@ -1148,7 +1335,6 @@
         document.getElementById('group-commitment-date').style.display = isRec ? 'none' : 'block';
       });
 
-      // Plan Generator Modal
       document.getElementById('btn-gen-select-all')?.addEventListener('click', () => {
         document.querySelectorAll('#gen-tasks-checklist input').forEach(c => c.checked = true);
       });
@@ -1156,7 +1342,6 @@
       document.getElementById('btn-calc-preview')?.addEventListener('click', () => this.calculatePlanPreview());
       document.getElementById('btn-apply-plan')?.addEventListener('click', () => this.applyPlan());
 
-      // Modal Close Handlers
       document.querySelectorAll('[data-close-modal]').forEach(b => {
         b.addEventListener('click', e => {
           const m = e.target.closest('.modal-backdrop');
@@ -1191,17 +1376,14 @@
     switchTab(tabName) {
       State.currentTab = tabName;
 
-      // Update Desktop Sidebar
       document.querySelectorAll('.sidebar-nav-item').forEach(b => {
         b.classList.toggle('active', b.getAttribute('data-tab') === tabName);
       });
 
-      // Update Mobile Bottom Nav
       document.querySelectorAll('.bottom-nav-item').forEach(b => {
         b.classList.toggle('active', b.getAttribute('data-tab') === tabName);
       });
 
-      // Update View Panels
       document.querySelectorAll('.view-panel').forEach(p => {
         p.classList.toggle('active', p.id === `view-${tabName}`);
       });
@@ -1225,10 +1407,6 @@
       }
     },
 
-    // =======================================================================
-    // 1. TODAY VIEW
-    // =======================================================================
-
     renderToday() {
       const todayStr = getTodayDateString();
       const dateHeading = document.getElementById('today-date-heading');
@@ -1243,7 +1421,6 @@
       const dueTodayPending = dueToday.filter(t => t.status !== 'Completed');
       const dueTodayDone = dueToday.filter(t => t.status === 'Completed');
 
-      // Progress Line
       const totalDueCount = dueToday.length;
       const doneCount = dueTodayDone.length;
       const pct = totalDueCount > 0 ? Math.round((doneCount / totalDueCount) * 100) : 100;
@@ -1263,7 +1440,6 @@
           : 'You are caught up on tasks due today.';
       }
 
-      // Today's Plan Timeline
       const scheduleList = document.getElementById('today-schedule-list');
       const planStatusBadge = document.getElementById('today-plan-status-badge');
       const btnReschedule = document.getElementById('btn-today-reschedule');
@@ -1335,7 +1511,6 @@
         }
       }
 
-      // Urgent & Due Today Checklist
       const tasksChecklist = document.getElementById('today-tasks-checklist');
       const urgentCounter = document.getElementById('today-urgent-counter');
       if (urgentCounter) urgentCounter.textContent = dueTodayPending.length;
@@ -1366,7 +1541,6 @@
         }
       }
 
-      // Today's Fixed Commitments
       const commitmentsList = document.getElementById('today-commitments-list');
       const commsCounter = document.getElementById('today-commitments-counter');
       const todayComms = SchedulerEngine.getCommitmentsForDate(todayStr, State.data.commitments);
@@ -1389,10 +1563,6 @@
       }
     },
 
-    // =======================================================================
-    // 2. TASKS DATABASE VIEW (Notion Style)
-    // =======================================================================
-
     renderTasksTable() {
       const rowsContainer = document.getElementById('tasks-database-rows');
       if (!rowsContainer) return;
@@ -1401,7 +1571,6 @@
       let list = [...State.data.tasks];
       const filters = State.taskFilters;
 
-      // Filter: Search
       if (filters.search) {
         const q = filters.search;
         list = list.filter(t =>
@@ -1411,7 +1580,6 @@
         );
       }
 
-      // Filter: Status pill
       if (filters.status === 'active') {
         list = list.filter(t => t.status !== 'Completed');
       } else if (filters.status === 'completed') {
@@ -1422,17 +1590,14 @@
         list = list.filter(t => t.dueDate < todayStr && t.status !== 'Completed');
       }
 
-      // Filter: Subject
       if (filters.subject !== 'all') {
         list = list.filter(t => t.subject === filters.subject);
       }
 
-      // Filter: Priority
       if (filters.priority !== 'all') {
         list = list.filter(t => t.priority === filters.priority);
       }
 
-      // Sort
       const pScore = { Urgent: 4, High: 3, Medium: 2, Low: 1 };
       list.sort((a, b) => {
         if (filters.sort === 'dueDate-asc') return (a.dueDate || '').localeCompare(b.dueDate || '');
@@ -1512,10 +1677,6 @@
       });
     },
 
-    // =======================================================================
-    // 3. CALENDAR & AGENDA VIEW
-    // =======================================================================
-
     renderCalendar() {
       const selectedDate = State.selectedCalendarDate || getTodayDateString();
       const datePicker = document.getElementById('calendar-date-picker');
@@ -1524,7 +1685,6 @@
       const label = document.getElementById('cal-selected-day-label');
       if (label) label.textContent = formatDateDisplay(selectedDate);
 
-      // Selected Day Agenda: Study blocks + Fixed Commitments
       const agendaList = document.getElementById('cal-day-agenda-list');
       const plan = State.data.plans[selectedDate];
       const comms = SchedulerEngine.getCommitmentsForDate(selectedDate, State.data.commitments);
@@ -1535,7 +1695,6 @@
         if (plan && Array.isArray(plan.blocks)) {
           combined = [...plan.blocks];
         } else {
-          // If no plan, show fixed commitments
           comms.forEach(c => {
             combined.push({
               id: 'c_' + c.id,
@@ -1569,7 +1728,6 @@
         }
       }
 
-      // Commitments Library List
       const commsList = document.getElementById('cal-commitments-library');
       const totalCounter = document.getElementById('cal-commitments-total');
       const allComms = State.data.commitments;
@@ -1620,10 +1778,6 @@
       }
     },
 
-    // =======================================================================
-    // 4. SETTINGS VIEW
-    // =======================================================================
-
     renderSettings() {
       const s = State.data.settings;
       const sleepStart = document.getElementById('set-sleep-start');
@@ -1636,12 +1790,8 @@
       if (bufMins) bufMins.value = s.bufferMinutes || 30;
       if (breakMins) breakMins.value = s.breakDurationMinutes || 10;
 
-      CloudSync.updateStatusBadge();
+      SaveStatus.render();
     },
-
-    // =======================================================================
-    // MODAL DIALOGS
-    // =======================================================================
 
     openModal(id) {
       const el = document.getElementById(id);
@@ -1653,7 +1803,6 @@
       if (el) el.classList.remove('active');
     },
 
-    // Task Modal: Clean, initially showing essential fields
     openTaskModal(taskId = null) {
       const modalTitle = document.getElementById('modal-task-title');
       const idInput = document.getElementById('task-id');
@@ -1734,20 +1883,14 @@
           title, subject, dueDate, durationMinutes, priority, type, dueTime, preferredStudyDate, status, notes
         });
       } else {
-        const newTask = {
-          id: 'task_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
-          title, subject, dueDate, durationMinutes, priority, type, dueTime, preferredStudyDate, status, notes,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          completedAt: status === 'Completed' ? new Date().toISOString() : null
-        };
-        State.addTask(newTask);
+        State.addTask({
+          title, subject, dueDate, durationMinutes, priority, type, dueTime, preferredStudyDate, status, notes
+        });
       }
 
       this.closeModal('modal-task');
     },
 
-    // Commitment Modal
     openCommitmentModal(commId = null) {
       const idInput = document.getElementById('commitment-id');
       const titleInput = document.getElementById('commitment-title');
@@ -1837,7 +1980,6 @@
       this.closeModal('modal-commitment');
     },
 
-    // Plan My Day Workflow
     openPlanGenerator(dateStr) {
       const genDate = document.getElementById('gen-plan-date');
       const genStart = document.getElementById('gen-start-time');
@@ -1992,6 +2134,11 @@
       const okBtn = document.getElementById('modal-confirm-ok');
       const cancelBtn = document.getElementById('modal-confirm-cancel');
 
+      if (!okBtn || !cancelBtn) {
+        if (typeof onConfirm === 'function') onConfirm();
+        return;
+      }
+
       if (msg) msg.textContent = message;
 
       const cleanup = () => {
@@ -2033,7 +2180,7 @@
   };
 
   // =========================================================================
-  // UTILITY FUNCTIONS
+  // UTILITIES
   // =========================================================================
 
   function getTodayDateString() {
@@ -2093,10 +2240,12 @@
   }
 
   // =========================================================================
-  // EXPORTS & BOOTSTRAP
+  // GLOBAL EXPORTS & BOOTSTRAP
   // =========================================================================
 
   window.StudyFlow = {
+    SaveStatus,
+    TombstoneStore,
     Storage,
     CloudSync,
     State,

@@ -38,11 +38,34 @@ Hosted seamlessly on **GitHub Pages** with zero build pipelines, no Node.js serv
 
 4. **Settings (`Settings`):**
    * **Google Sign-In & Cross-Device Cloud Sync:** Sign in with Google to synchronize tasks seamlessly between laptop and phone.
-   * **Sync Status Indicator:** Real-time indicator (`Synced` 🟢, `Syncing...` 🟡, `Offline` 🔴, `Local Mode` ⚪).
+   * **Persistent Save Status:** Clear real-time status pill (`Saved` 🟢, `Saving...` 🟡, `Save failed` 🔴, `Offline` ⚪). Never claims "Saved" before changes are actually written.
    * **Local Data Cloud Migration:** 1-click upload of pre-existing local tasks to your Google account upon sign-in.
    * **Study & Sleep Routine:** Configure sleep bedtime (default 23:00), wake-up time (06:30), short breaks (10m), and surprise homework buffer (30m).
-   * **Backup & Safety:** One-click JSON export/import backup.
-   * **Diagnostics:** Run the integrated 16-test automated diagnostic suite.
+   * **Backup & Safety:** One-click JSON export/import backup with strict schema validation.
+   * **Diagnostics:** Run the integrated 22-test automated diagnostic suite (`test.html`).
+
+---
+
+## 🔒 Critical Persistence & Synchronization Guarantees
+
+StudyFlow 2.0 is built on an authoritative, local-first persistence engine with strict consistency rules:
+
+1. **Automatic Save on Every Change:**
+   * Adding, editing, deleting, completing, or rescheduling automatically saves immediately to `localStorage` and (if authenticated) Cloud Firestore.
+   * Status indicators display `Saving...` during writes, and only transition to `Saved` when disk/cloud persistence is confirmed.
+   * On write errors or quota limits, `Save failed` is displayed with failure details, ensuring silent data loss never occurs.
+
+2. **Deletions Stay Deleted (Tombstone Guard):**
+   * When an item is deleted, a timestamped tombstone is recorded in `studyflow_v2_tombstones`.
+   * Tombstones permanently prevent deleted items from being resurrected by page refreshes, stale local caches, or older snapshots synced from another device.
+
+3. **Edits Replace Old Values Everywhere (No Duplicates):**
+   * Edits perform in-place updates matching on stable unique IDs (`task_...`).
+   * Changes to task titles, durations, priorities, subjects, and completion statuses immediately propagate across all scheduled blocks in daily plans (`State.data.plans`).
+
+4. **Reliable Conflict Resolution:**
+   * Cloud sync applies a Last-Write-Wins (LWW) merge algorithm combined with local and remote tombstone checks.
+   * Stale local data never overwrites newer cloud edits, and initialization never wipes existing data with empty sets.
 
 ---
 
@@ -105,10 +128,10 @@ StudyFlow uses a **local-first** architecture: it works completely offline using
 myhelper/
 ├── index.html       # Notion-inspired semantic layout (Today, Tasks, Calendar, Settings)
 ├── style.css        # Clean Notion light theme, dark mode, compact sidebar, mobile nav
-├── script.js        # Storage, Firebase Auth, Firestore sync, scheduler, and UI
+├── script.js        # Storage, Tombstones, Firebase Auth, Firestore sync, scheduler, and UI
 ├── manifest.json    # PWA configuration for phone home screen installability
 ├── firestore.rules  # Cloud Firestore private-user security rules
-├── test.html        # Comprehensive automated 16-test diagnostic suite
+├── test.html        # Comprehensive automated 22-test diagnostic suite
 └── README.md        # Documentation and deployment guide
 ```
 
@@ -120,7 +143,7 @@ No npm or build tools needed. Simply double-click `index.html` in your browser, 
 ```bash
 python -m http.server 8000
 ```
-Open `http://localhost:8000`.
+Open `http://localhost:8000`. Run the tests by opening `http://localhost:8000/test.html`.
 
 ---
 

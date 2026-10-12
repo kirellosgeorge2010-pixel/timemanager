@@ -270,13 +270,17 @@ body {
   background-color: var(--status-local);
 }
 
-.sync-pill.synced .sync-dot { background-color: var(--status-synced); }
-.sync-pill.syncing .sync-dot { background-color: var(--status-syncing); animation: pulseDot 1s infinite; }
-.sync-pill.offline .sync-dot { background-color: var(--status-offline); }
+.sync-pill.saved .sync-dot { background-color: #10b981; }
+.sync-pill.synced .sync-dot { background-color: #10b981; }
+.sync-pill.saving .sync-dot { background-color: #f59e0b; animation: pulseDot 0.8s infinite; }
+.sync-pill.syncing .sync-dot { background-color: #f59e0b; animation: pulseDot 0.8s infinite; }
+.sync-pill.failed { border-color: rgba(239, 68, 68, 0.4); color: #ef4444; background: rgba(239, 68, 68, 0.08); font-weight: 600; }
+.sync-pill.failed .sync-dot { background-color: #ef4444; }
+.sync-pill.offline .sync-dot { background-color: #6b7280; }
 
 @keyframes pulseDot {
   0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.4; transform: scale(0.8); }
+  50% { opacity: 0.3; transform: scale(0.75); }
 }
 
 /* ==========================================================================
